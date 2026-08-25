@@ -50,6 +50,7 @@ struct RootView: View {
                 drawingRouteActive: $drawingRouteActive,
                 drawingRoutePointCount: $drawingRoutePointCount
             )
+            .allowsHitTesting(!(session.altitudeLoading && session.routeActive))
 
             VStack(spacing: 10) {
                 if let favoriteRenameSuggestion, !searchPresented {
@@ -93,7 +94,28 @@ struct RootView: View {
             }
             .padding(.horizontal, MapChromeLayout.horizontalPadding)
             .padding(.bottom, MapChromeLayout.bottomPadding)
+            .allowsHitTesting(!(session.altitudeLoading && session.routeActive))
             .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+            if session.altitudeLoading, session.routeActive {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(true)
+                    .overlay(
+                        VStack(spacing: 12) {
+                            ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
+                                .progressViewStyle(.linear)
+                                .frame(width: 200)
+                            Text("获取路线海拔 \(session.altitudeProgress)/\(session.altitudeTotal)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        .padding(20)
+                        .locusGlass(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -518,6 +540,23 @@ struct StatusBarView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
+            if session.altitudeEnabled {
+                if session.altitudeLoading {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
+                            .progressViewStyle(.linear)
+                        Text("海拔加载中 \(session.altitudeProgress)/\(session.altitudeTotal)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: 120)
+                } else if let altitude = session.simulatedAltitude {
+                    Text("海拔：\(altitudeText(altitude))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
         }
         .padding(12)
         .frame(width: 270, alignment: .leading)
@@ -546,8 +585,11 @@ struct StatusBarView: View {
             "城市：\(locationSummary.city)",
             "邮编：\(locationSummary.postalCode)",
             mapDataSourceCopyLine,
-            coordinate
+            coordinate,
+            (session.altitudeEnabled ? session.simulatedAltitude : nil)
+                .map { "海拔：\(altitudeText($0))" }
         ]
+        .compactMap { $0 }
         .filter { !$0.isEmpty }
         .joined(separator: "\n")
     }
@@ -558,6 +600,10 @@ struct StatusBarView: View {
 
     private func longitudeText(_ longitude: Double) -> String {
         String(format: "%.5f° %@", abs(longitude), longitude >= 0 ? "E" : "W")
+    }
+
+    private func altitudeText(_ altitude: CLLocationDistance) -> String {
+        String(format: "%.0f 米", altitude)
     }
 
     private var mapDataSourceName: String {

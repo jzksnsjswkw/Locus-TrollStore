@@ -12,11 +12,17 @@ struct SettingsView: View {
     @State private var pendingBackup: LocusBackup?
     @State private var backupNotice: String?
     @State private var confirmClearSearchHistory = false
+    @AppStorage(UserDefaults.elevationDataSourceKey) private var elevationSource: ElevationDataSource = .openMeteo
 
     private var appVersion: String {
         let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
         return build.isEmpty ? short : "\(short) (\(build))"
+    }
+
+    private var altitudeDisplayText: String {
+        guard let altitude = session.simulatedAltitude else { return "等待定位…" }
+        return String(format: "%.0f 米", altitude)
     }
 
     var body: some View {
@@ -206,10 +212,62 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Toggle("模拟真实海拔", isOn: $session.altitudeEnabled)
+            if session.altitudeEnabled {
+                LocusLabeledRow("当前海拔") {
+                    if session.altitudeLoading {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
+                                .progressViewStyle(.linear)
+                                .frame(width: 100)
+                            Text("\(session.altitudeProgress)/\(session.altitudeTotal)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text(altitudeDisplayText)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Picker("海拔数据源", selection: $elevationSource) {
+                    ForEach(ElevationDataSource.allCases) { source in
+                        VStack(alignment: .leading) {
+                            Text(source.pickerLabel)
+                            Text(source.resolution)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .tag(source)
+                    }
+                }
+
+                Text(elevationSource.description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if elevationSource.requiresAPIKey {
+                    SecureField(
+                        "API Key",
+                        text: Binding(
+                            get: { UserDefaults.standard.elevationAPIKey(for: elevationSource) ?? "" },
+                            set: { UserDefaults.standard.setElevationAPIKey($0.isEmpty ? nil : $0, for: elevationSource) }
+                        )
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    if let url = elevationSource.registerURL {
+                        Link("注册获取 API Key", destination: url)
+                            .font(.caption)
+                    }
+                }
+            }
         } header: {
             Text("地图与交互")
         } footer: {
-            Text("位置抖动让轨迹更接近真实 GPS 行为；半径越大抖动越明显。更新间隔决定移动时推送模拟坐标的频率，不影响行进速度；抖动幅度会在每次更新时随机微调该间隔，且不会超过更新间隔。")
+            Text("位置抖动让轨迹更接近真实 GPS 行为；半径越大抖动越明显。更新间隔决定移动时推送模拟坐标的频率，不影响行进速度；抖动幅度会在每次更新时随机微调该间隔，且不会超过更新间隔。模拟海拔数据从所选源获取并本地缓存，海拔会随定位变化而更新。")
         }
     }
 
