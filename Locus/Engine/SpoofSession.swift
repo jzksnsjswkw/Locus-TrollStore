@@ -144,6 +144,18 @@ final class SpoofSession: ObservableObject {
             restartJoystickTimerIfNeeded()
         }
     }
+    /// When on, simulated positions carry the real elevation of the target
+    /// coordinate (fetched from a DEM) so altitude roughly matches terrain.
+    @Published var altitudeEnabled = true {
+        didSet { UserDefaults.standard.set(altitudeEnabled, forKey: "locus.altitudeEnabled") }
+    }
+    /// Last elevation (meters) applied to the simulated location, if any.
+    @Published private(set) var simulatedAltitude: CLLocationDistance?
+    /// True while the DEM service is fetching elevation data.
+    @Published var altitudeLoading = false
+    /// Progress of the current batch elevation fetch.
+    @Published var altitudeProgress = 0
+    @Published var altitudeTotal = 0
 
     @Published var favorites: [SavedPlace] = []
     @Published var recents: [SavedPlace] = []
@@ -181,6 +193,9 @@ final class SpoofSession: ObservableObject {
         let storedUpdateJitter = UserDefaults.standard.double(forKey: "locus.locationUpdateJitter")
         locationUpdateJitter = storedUpdateJitter > 0 ? min(5, storedUpdateJitter) : 0
         locationUpdateJitter = min(locationUpdateJitter, locationUpdateInterval)
+        altitudeEnabled = UserDefaults.standard.object(forKey: "locus.altitudeEnabled") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "locus.altitudeEnabled")
         travelMode = TravelMode(rawValue: UserDefaults.standard.string(forKey: "locus.travelMode") ?? "") ?? .walk
         mapStyleIndex = min(1, max(0, UserDefaults.standard.integer(forKey: "locus.mapStyleIndex")))
         targetSelectionMode = TargetSelectionMode(
@@ -348,7 +363,19 @@ final class SpoofSession: ObservableObject {
 
     func teleport(to coordinate: CLLocationCoordinate2D) {
         pin = coordinate
-        apply(coordinate, markRecent: true)
+        guard altitudeEnabled else {
+            apply(coordinate, markRecent: true)
+            return
+        }
+        Task { @MainActor in
+            altitudeLoading = true
+            altitudeProgress = 0
+            altitudeTotal = 1
+            let altitude = await ElevationService.elevation(at: coordinate)
+            altitudeProgress = 1
+            altitudeLoading = false
+            apply(coordinate, markRecent: true, altitude: altitude)
+        }
     }
 
     var isMoving: Bool { routeActive || joystickActive }
@@ -522,13 +549,16 @@ final class SpoofSession: ObservableObject {
             guard let self else { return }
             var firstPass = true
             var lap = 0
+            let routeAltitudes = self.altitudeEnabled
+                ? await { await MainActor.run { self.altitudeLoading = true; self.altitudeProgress = 0; self.altitudeTotal = coordinates.count }; try? await Task.sleep(nanoseconds: 50_000_000); let r: [CLLocationDistance?]? = await Task.detached { await ElevationService.elevations(for: coordinates) { done, _ in Task { @MainActor in self.altitudeProgress = done } } }.value; await MainActor.run { self.altitudeLoading = false; self.altitudeProgress = 0; self.altitudeTotal = 0 }; return r }()
+                : nil
             repeat {
                 if Task.isCancelled { break }
                 lap += 1
                 self.routeLap = lap
                 var previous = coordinates[0]
                 var emittedCoordinate = previous
-                guard self.apply(previous, markRecent: firstPass) else { break }
+                guard self.apply(previous, markRecent: firstPass, altitude: routeAltitudes?.first ?? nil) else { break }
                 firstPass = false
 
                 for (segmentIndex, next) in coordinates.dropFirst().enumerated() {
@@ -549,12 +579,18 @@ final class SpoofSession: ObservableObject {
                                 longitude: previous.longitude + (next.longitude - previous.longitude) * t
                             )
                         )
+                        let altitude = routeAltitudes.flatMap { altitudes -> CLLocationDistance? in
+                            guard segmentIndex + 1 < altitudes.count,
+                                  let from = altitudes[segmentIndex],
+                                  let to = altitudes[segmentIndex + 1] else { return nil }
+                            return from + (to - from) * t
+                        }
                         try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                         if Task.isCancelled { break }
                         self.routeDistanceTraveled += Self.distance(from: emittedCoordinate, to: coord)
                         self.routeElapsedTime += interval
                         emittedCoordinate = coord
-                        guard self.apply(coord, markRecent: false) else { break }
+                        guard self.apply(coord, markRecent: false, altitude: altitude) else { break }
                         self.routeProgress = min(1, (Double(segmentIndex) + t) / Double(max(1, coordinates.count - 1)))
                     }
                     previous = next
@@ -765,7 +801,8 @@ final class SpoofSession: ObservableObject {
     @discardableResult
     private func apply(
         _ coordinate: CLLocationCoordinate2D,
-        markRecent: Bool
+        markRecent: Bool,
+        altitude: CLLocationDistance? = nil
     ) -> Bool {
         guard CLLocationCoordinate2DIsValid(coordinate),
               coordinate.latitude.isFinite, coordinate.longitude.isFinite else {
@@ -782,13 +819,17 @@ final class SpoofSession: ObservableObject {
         let systemCoordinate = ChinaCoordinateTransform.mapCoordinateToSystemCoordinate(coordinate)
         let result = LocationEngine.set(
             latitude: systemCoordinate.latitude,
-            longitude: systemCoordinate.longitude
+            longitude: systemCoordinate.longitude,
+            altitude: altitudeEnabled ? altitude : nil
         )
         isBusy = false
         switch result {
         case .success:
             simulated = coordinate
             pin = coordinate
+            if altitudeEnabled, let altitude {
+                simulatedAltitude = altitude
+            }
             status = .active
             lastError = nil
             beginBackground()
@@ -822,7 +863,19 @@ final class SpoofSession: ObservableObject {
         lastJoystickTickAt = now
         let meters = speed * dt
         let next = jittered(offset(coordinate: current, eastMeters: nx * meters, northMeters: ny * meters))
-        _ = apply(next, markRecent: false)
+        if altitudeEnabled {
+            Task { @MainActor in
+                altitudeLoading = true
+                altitudeProgress = 0
+                altitudeTotal = 1
+                let altitude = await ElevationService.elevation(at: next)
+                altitudeProgress = 1
+                altitudeLoading = false
+                _ = apply(next, markRecent: false, altitude: altitude)
+            }
+        } else {
+            _ = apply(next, markRecent: false)
+        }
     }
 
     private func pushRecent(_ coordinate: CLLocationCoordinate2D) {

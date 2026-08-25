@@ -6,6 +6,7 @@ struct LocusApp: App {
     @AppStorage(SetupGate.defaultsKey) private var setupComplete = false
 
     init() {
+        ElevationService.loadPersistedCache()
         LegacyCompatibility.applyListAppearance()
     }
 

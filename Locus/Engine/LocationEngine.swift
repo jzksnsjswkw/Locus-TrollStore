@@ -27,10 +27,25 @@ enum LocationEngine {
 
     static var isSessionActive: Bool { active }
 
-    static func set(latitude: Double, longitude: Double) -> Result<Void, LocationEngineError> {
+    static func set(
+        latitude: Double,
+        longitude: Double,
+        altitude: CLLocationDistance? = nil
+    ) -> Result<Void, LocationEngineError> {
         var result: Result<Void, LocationEngineError> = .failure(.locationSet)
         queue.sync {
-            let location = CLLocation(latitude: latitude, longitude: longitude)
+            let location: CLLocation
+            if let altitude {
+                location = CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                    altitude: altitude,
+                    horizontalAccuracy: 5,
+                    verticalAccuracy: 8,
+                    timestamp: Date()
+                )
+            } else {
+                location = CLLocation(latitude: latitude, longitude: longitude)
+            }
             simManager.stopLocationSimulation()
             simManager.clearSimulatedLocations()
             simManager.appendSimulatedLocation(location)

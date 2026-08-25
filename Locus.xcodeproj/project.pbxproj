@@ -19,6 +19,7 @@
 		73FB8F9F1681ECD08D3FD0F7 /* ChinaCoordinateTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ED06474BBB90409C7FAF300 /* ChinaCoordinateTransform.swift */; };
 		74A5BCF6953128864737A070 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2D4CA41C622A34E45EF21F54 /* Assets.xcassets */; };
 		87B0D41458D6AF0D39C9AAA4 /* RoutePlannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76779E56819A74B78236EF1 /* RoutePlannerSheet.swift */; };
+		8947715D2C3F52799CA3590A /* ElevationDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4800DDA64D40FECF04A4BD1 /* ElevationDataSource.swift */; };
 		8C7EB217E63917A7D9E4E1D7 /* LocusLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27EFFE1D6962998D804B6CA7 /* LocusLiveActivity.swift */; };
 		8EAFB147F0F0E2AAE207D276 /* RouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FC0C702516F159A7EF6D853 /* RouteBuilder.swift */; };
 		976D8B4B49C6B6588EA59B2F /* LocusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03DE64DA7097F210F1075553 /* LocusApp.swift */; };
@@ -27,6 +28,7 @@
 		B10A777C5622EE884A890643 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1AF0F32E88B4227CA45694 /* RootView.swift */; };
 		C5B176B29163E524B776757A /* BackgroundKeepAlive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5415BEF759B8C8AF04096B3E /* BackgroundKeepAlive.swift */; };
 		C8CC0EF3E134ADF2BE9F995F /* MapDropPin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797AA07D5CE5A7FD9D385F5F /* MapDropPin.swift */; };
+		C96964BBAFC46CE12D7F387D /* ElevationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529D32F084B44403191145DB /* ElevationService.swift */; };
 		C96E6E6D52B7626C83465596 /* UserPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A318D0A0DF02377C46208257 /* UserPreferences.swift */; };
 		D5613248D3DDD96C0D62BF7F /* MapHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F714A23C4C718E67E978565F /* MapHomeView.swift */; };
 		DA2B8023B167C95C2A034C47 /* LocationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377FB9983B927B5898D09160 /* LocationEngine.swift */; };
@@ -76,6 +78,7 @@
 		429366C3732ACF4031A7006B /* SetupFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupFlowView.swift; sourceTree = "<group>"; };
 		43E537C130BA27E6F6B1CEA4 /* LocusLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LocusLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		45C4DB822227311F49D3E3F4 /* Backport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backport.swift; sourceTree = "<group>"; };
+		529D32F084B44403191145DB /* ElevationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElevationService.swift; sourceTree = "<group>"; };
 		5415BEF759B8C8AF04096B3E /* BackgroundKeepAlive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundKeepAlive.swift; sourceTree = "<group>"; };
 		6B8C1927DBBDAD0CDFEB0839 /* LocusActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocusActivityAttributes.swift; sourceTree = "<group>"; };
 		73213CCBDEECC0132696CC4E /* CLSimulationManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CLSimulationManager.h; sourceTree = "<group>"; };
@@ -85,6 +88,7 @@
 		8EA9F9A2A821575AEE768E67 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A318D0A0DF02377C46208257 /* UserPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPreferences.swift; sourceTree = "<group>"; };
 		AEFB9A10F8784355D5344D95 /* Locus.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Locus.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B4800DDA64D40FECF04A4BD1 /* ElevationDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElevationDataSource.swift; sourceTree = "<group>"; };
 		B6EA4CF41E10BCEBEAE08F3E /* LocusBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocusBackup.swift; sourceTree = "<group>"; };
 		C6C3F15BC482A2CBF13B1EA6 /* SpoofSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoofSession.swift; sourceTree = "<group>"; };
 		CFF6D1EA6EBAAF543339FF81 /* JoystickPad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JoystickPad.swift; sourceTree = "<group>"; };
@@ -173,6 +177,8 @@
 				5415BEF759B8C8AF04096B3E /* BackgroundKeepAlive.swift */,
 				0ED06474BBB90409C7FAF300 /* ChinaCoordinateTransform.swift */,
 				73213CCBDEECC0132696CC4E /* CLSimulationManager.h */,
+				B4800DDA64D40FECF04A4BD1 /* ElevationDataSource.swift */,
+				529D32F084B44403191145DB /* ElevationService.swift */,
 				377FB9983B927B5898D09160 /* LocationEngine.swift */,
 				1FC0C702516F159A7EF6D853 /* RouteBuilder.swift */,
 				C6C3F15BC482A2CBF13B1EA6 /* SpoofSession.swift */,
@@ -331,6 +337,8 @@
 				C5B176B29163E524B776757A /* BackgroundKeepAlive.swift in Sources */,
 				145588D172889479C6311C08 /* Backport.swift in Sources */,
 				73FB8F9F1681ECD08D3FD0F7 /* ChinaCoordinateTransform.swift in Sources */,
+				8947715D2C3F52799CA3590A /* ElevationDataSource.swift in Sources */,
+				C96964BBAFC46CE12D7F387D /* ElevationService.swift in Sources */,
 				AB35A419877FF9CA0B4AB114 /* JoystickPad.swift in Sources */,
 				DA2B8023B167C95C2A034C47 /* LocationEngine.swift in Sources */,
 				1833D0A672C1396A3B666C1B /* LocusActivityAttributes.swift in Sources */,
