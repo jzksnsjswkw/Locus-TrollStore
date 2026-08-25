@@ -8,3 +8,6 @@ Vendor/idevice-build/
 outputs/
 *.ipa
 Payload/
+
+# Development agent workspace
+.sisyphus/
