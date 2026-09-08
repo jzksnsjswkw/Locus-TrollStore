@@ -2,7 +2,7 @@ name: Locus
 options:
   bundleIdPrefix: com.chrismack
   deploymentTarget:
-    iOS: "15.0"
+    iOS: "14.0"
   xcodeVersion: "16.0"
   createIntermediateGroups: true
 settings:
@@ -11,7 +11,7 @@ settings:
     DEVELOPMENT_TEAM: ""
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1,2"
-    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "14.0"
 targets:
   Locus:
     type: application
@@ -24,8 +24,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chrismack.locus
         PRODUCT_NAME: Locus
-        MARKETING_VERSION: "1.2.0"
-        CURRENT_PROJECT_VERSION: "7"
+        MARKETING_VERSION: "1.2.1"
+        CURRENT_PROJECT_VERSION: "8"
         INFOPLIST_FILE: Locus/Resources/Info.plist
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
         CODE_SIGN_ENTITLEMENTS: Locus/Resources/Locus.entitlements
@@ -52,8 +52,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chrismack.locus.liveactivity
         PRODUCT_NAME: LocusLiveActivity
-        MARKETING_VERSION: "1.2.0"
-        CURRENT_PROJECT_VERSION: "7"
+        MARKETING_VERSION: "1.2.1"
+        CURRENT_PROJECT_VERSION: "8"
         INFOPLIST_FILE: LocusLiveActivity/Info.plist
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
         GENERATE_INFOPLIST_FILE: false
