@@ -19,7 +19,7 @@ struct TravelModeSelector: View {
                         Text(mode.title)
                             .font(.caption2.weight(.semibold))
                     }
-                    .foregroundStyle(session.travelMode == mode ? .black : .primary)
+                    .foregroundColor(session.travelMode == mode ? .black : .primary)
                     .frame(maxWidth: .infinity)
                     .frame(height: compact ? 40 : 44)
                     .locusGlass(

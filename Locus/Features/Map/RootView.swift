@@ -108,8 +108,8 @@ struct RootView: View {
                                 .frame(width: 200)
                             Text("获取路线海拔 \(session.altitudeProgress)/\(session.altitudeTotal)")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
+                                .foregroundColor(.secondary)
+                                .locusMonospacedDigit()
                         }
                         .padding(20)
                         .locusGlass(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -119,20 +119,24 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+                .environmentObject(session)
                 .locusMediumLargeDetents()
         }
         .sheet(isPresented: $showPlaces) {
             PlacesView()
+                .environmentObject(session)
                 .locusMediumLargeDetents()
         }
-        .alert("Locus", isPresented: Binding(
-            get: { session.lastError != nil },
-            set: { if !$0 { session.lastError = nil } }
-        )) {
-            Button("确定", role: .cancel) { session.lastError = nil }
-        } message: {
-            Text(session.lastError ?? "")
-        }
+        .locusAlert(
+            "Locus",
+            isPresented: Binding(
+                get: { session.lastError != nil },
+                set: { if !$0 { session.lastError = nil } }
+            ),
+            okTitle: "确定",
+            onOK: { session.lastError = nil },
+            message: session.lastError ?? ""
+        )
         .locusRenameAlert(
             isPresented: Binding(
                 get: { favoriteToRename != nil },
@@ -209,7 +213,7 @@ struct RootView: View {
         } label: {
             Label("重命名“\(session.favoriteDisplayName(favorite))”", systemImage: "pencil")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(LocusTheme.danger)
+                .foregroundColor(LocusTheme.danger)
                 .lineLimit(1)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
@@ -228,7 +232,7 @@ struct RootView: View {
                 NotificationCenter.default.post(name: .locusDeleteRoute, object: nil)
             } label: {
                 Label("删除", systemImage: "trash.fill")
-                    .foregroundStyle(LocusTheme.danger)
+                    .foregroundColor(LocusTheme.danger)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
             }
@@ -243,7 +247,7 @@ struct RootView: View {
                 NotificationCenter.default.post(name: .locusRunRoute, object: nil)
             } label: {
                 Label("运行", systemImage: "play.fill")
-                    .foregroundStyle(.blue)
+                    .foregroundColor(.blue)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
             }
@@ -270,11 +274,11 @@ struct RootView: View {
                         Text("路线 \(index + 1)")
                             .font(.caption.weight(.bold))
                         Text(routeOptionDetail(option))
-                            .font(.caption2.monospacedDigit())
+                            .font(.caption2.locusMonospacedDigit())
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                     }
-                    .foregroundStyle(selectedRouteOptionID == option.id ? Color.white : Color.primary)
+                    .foregroundColor(selectedRouteOptionID == option.id ? Color.white : Color.primary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(
                         Capsule().fill(
@@ -349,7 +353,7 @@ struct RootView: View {
             action()
         } label: {
             Label(title, systemImage: systemImage)
-                .foregroundStyle(color)
+                .foregroundColor(color)
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .contentShape(Rectangle())
         }
@@ -463,13 +467,13 @@ struct StatusBarView: View {
 
                     Text(title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundColor(.primary)
                         .lineLimit(1)
 
                     if locationSummary.coordinate != nil {
                         Text(locationSummary.shortText)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -500,14 +504,14 @@ struct StatusBarView: View {
                         .frame(height: 30)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white)
+                .foregroundColor(.white)
                 .locusGlass(.interactive, tint: Color.blue.opacity(0.45), in: Capsule())
 
             }
 
             Text(locationSummary.formattedAddress)
                 .font(.caption)
-                .foregroundStyle(.primary)
+                .foregroundColor(.primary)
                 .lineLimit(2)
 
             HStack(spacing: 12) {
@@ -525,18 +529,18 @@ struct StatusBarView: View {
                 }
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundColor(.secondary)
 
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                Label("当地时间：\(locationSummary.localTimeString(at: context.date))", systemImage: "clock")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            LocusTimelineView(60) { date in
+                Label("当地时间：\(locationSummary.localTimeString(at: date))", systemImage: "clock")
+                    .font(.caption2.locusMonospacedDigit())
+                    .foregroundColor(.secondary)
             }
 
             if let coordinate = locationSummary.coordinate {
                 Text("纬度：\(latitudeText(coordinate.latitude))  经度：\(longitudeText(coordinate.longitude))")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(.caption2.locusMonospacedDigit())
+                    .foregroundColor(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
@@ -546,14 +550,14 @@ struct StatusBarView: View {
                         ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
                             .progressViewStyle(.linear)
                         Text("海拔加载中 \(session.altitudeProgress)/\(session.altitudeTotal)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .font(.caption2.locusMonospacedDigit())
+                            .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: 120)
                 } else if let altitude = session.simulatedAltitude {
                     Text("海拔：\(altitudeText(altitude))")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .font(.caption2.locusMonospacedDigit())
+                        .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
             }
@@ -568,7 +572,7 @@ struct StatusBarView: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
             Text(value)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
@@ -624,7 +628,7 @@ struct StatusBarView: View {
                 .fontWeight(isActive ? .bold : .regular)
         }
         .font(.caption2)
-        .foregroundStyle(isActive ? Color.primary : Color.secondary)
+        .foregroundColor(isActive ? Color.primary : Color.secondary)
         .padding(.horizontal, 7)
         .frame(height: 24)
 
@@ -904,10 +908,10 @@ struct BottomControlsView: View {
                             VStack(spacing: 2) {
                                 Text(String(format: "%.2fx · %.1f km/h", session.speedMultiplier, session.travelMode.baseSpeed * session.speedMultiplier * 3.6))
                                     .font(.subheadline.bold())
-                                    .monospacedDigit()
+                                    .locusMonospacedDigit()
                                 Text(routeProgressText)
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
+                                    .font(.caption.locusMonospacedDigit())
+                                    .foregroundColor(.secondary)
                             }
                             Spacer()
 
@@ -921,7 +925,7 @@ struct BottomControlsView: View {
                         .buttonStyle(.borderless)
 
                         ProgressView(value: session.routeProgress)
-                            .tint(LocusTheme.accent)
+                            .locusTint(LocusTheme.accent)
 
                         routeRuntimeOptions
                     }
@@ -991,7 +995,7 @@ struct BottomControlsView: View {
             .disabled(!session.routeLoopEnabled || session.routeLoopCount <= minimumLoopCount)
 
             Text("共 \(session.routeLoopCount) 圈")
-                .font(.caption.monospacedDigit().weight(.semibold))
+                .font(.caption.locusMonospacedDigit().weight(.semibold))
                 .frame(minWidth: 58)
 
             Button {
@@ -1003,7 +1007,7 @@ struct BottomControlsView: View {
             .disabled(!session.routeLoopEnabled || session.routeLoopCount >= 99)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(session.routeLoopEnabled ? Color.primary : Color.secondary)
+        .foregroundColor(session.routeLoopEnabled ? Color.primary : Color.secondary)
         .background(Capsule().fill(Color.primary.opacity(0.08)))
         .contentShape(Capsule())
         .opacity(session.routeLoopEnabled ? 1 : 0.55)
@@ -1021,7 +1025,7 @@ struct BottomControlsView: View {
         } label: {
             Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundColor(.primary)
                 .frame(width: 48, height: 48)
                 .contentShape(Rectangle())
         }
@@ -1039,7 +1043,7 @@ struct BottomControlsView: View {
         } label: {
             Image(systemName: "circle.grid.cross.fill")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(session.joystickActive ? LocusTheme.accentSecondary : .primary)
+                .foregroundColor(session.joystickActive ? LocusTheme.accentSecondary : .primary)
                 .frame(width: 48, height: 48)
                 .contentShape(Rectangle())
         }
@@ -1060,7 +1064,7 @@ struct BottomControlsView: View {
                     .minimumScaleFactor(0.8)
             }
             .font(.subheadline.weight(.bold))
-            .foregroundStyle(sessionControlForegroundColor)
+            .foregroundColor(sessionControlForegroundColor)
             .frame(maxWidth: .infinity)
             .frame(height: 48)
             .padding(.horizontal, 8)
@@ -1071,7 +1075,7 @@ struct BottomControlsView: View {
         .disabled(!session.isSpoofing && session.isBusy)
         .contextMenu {
             if session.canResumeRoute {
-                Button(role: .destructive) {
+                Button {
                     session.stop()
                 } label: {
                     Label("停止定位", systemImage: "stop.fill")
@@ -1097,7 +1101,7 @@ struct BottomControlsView: View {
                 } label: {
                     Text("停止")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .locusGlass(.interactive, tint: LocusTheme.danger, in: Capsule())
@@ -1114,7 +1118,7 @@ struct BottomControlsView: View {
                 } label: {
                     Text("应用当前位置")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.black)
+                        .foregroundColor(.black)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                         .frame(maxWidth: .infinity)
@@ -1133,7 +1137,7 @@ struct BottomControlsView: View {
                 } label: {
                     Text("开始定位")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(startControlForegroundColor)
+                        .foregroundColor(startControlForegroundColor)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .locusGlass(.interactive, tint: startControlColor, in: Capsule())
@@ -1147,7 +1151,7 @@ struct BottomControlsView: View {
                 } label: {
                     Text("生成轨迹")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .locusGlass(.interactive, tint: Color.blue, in: Capsule())
@@ -1166,7 +1170,7 @@ struct BottomControlsView: View {
             } label: {
                 Text("结束")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
                     .locusGlass(.interactive, tint: LocusTheme.danger, in: Capsule())
@@ -1179,7 +1183,7 @@ struct BottomControlsView: View {
             } label: {
                 Text("继续")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.black)
+                    .foregroundColor(.black)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
                     .locusGlass(.interactive, tint: LocusTheme.accent, in: Capsule())
@@ -1233,7 +1237,7 @@ struct BottomControlsView: View {
         } label: {
             Image(systemName: systemName)
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundColor(.primary)
                 .frame(width: 48, height: 48)
                 .contentShape(Rectangle())
         }
@@ -1255,6 +1259,6 @@ struct IconButton: View {
         }
         .buttonStyle(.plain)
         .locusGlass(.interactive, in: Circle())
-        .foregroundStyle(.primary)
+        .foregroundColor(.primary)
     }
 }

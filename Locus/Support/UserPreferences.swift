@@ -38,13 +38,6 @@ enum TargetSelectionMode: String, CaseIterable, Codable, Identifiable {
         case .crosshair: return "屏幕准星"
         }
     }
-
-    var icon: String {
-        switch self {
-        case .pin: return "mappin"
-        case .crosshair: return "scope"
-        }
-    }
 }
 
 struct SearchHistoryEntry: Identifiable, Codable, Equatable {

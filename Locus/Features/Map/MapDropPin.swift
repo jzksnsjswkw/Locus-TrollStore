@@ -94,7 +94,7 @@ struct MapDropPin: View {
         // devices above MKMapView; a direct tap gesture honors contentShape.
         Label(title, systemImage: systemImage)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(color)
+            .foregroundColor(color)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
             .frame(width: width, height: 44)
@@ -167,17 +167,17 @@ private struct RedSelectionPin: View {
                         endPoint: .bottom
                     )
                 )
-                .overlay {
+                .overlay(
                     SelectionPinShape()
-                        .stroke(.white.opacity(0.95), lineWidth: 2)
-                }
+                        .stroke(Color.white.opacity(0.95), lineWidth: 2)
+                )
 
             Circle()
                 .fill(.white)
                 .frame(width: 11, height: 11)
-                .overlay {
+                .overlay(
                     Circle().stroke(Color.red.opacity(0.25), lineWidth: 1)
-                }
+                )
                 .padding(.top, 10)
         }
     }

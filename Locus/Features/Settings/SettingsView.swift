@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var session: SpoofSession
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     @State private var showNameEasterEgg = false
     @State private var showBackupExporter = false
@@ -34,7 +34,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("保存搜索历史", isOn: $session.searchHistoryEnabled)
                     if !session.searchHistory.isEmpty {
-                        Button("清空搜索历史", role: .destructive) {
+                        Button("清空搜索历史") {
                             confirmClearSearchHistory = true
                         }
                     }
@@ -59,16 +59,18 @@ struct SettingsView: View {
                 privacySection
                     .locusSheetRows()
 
-                Section("关于") {
+                Section(header: Text("关于")) {
                     LocusLabeledRow("版本", value: appVersion)
                     LocusLabeledRow("定位引擎", value: "CLSimulationManager（TrollStore）")
                     Link(destination: URL(string: "https://github.com/jzksnsjswkw/locus-ZH")!) {
                         LocusLabeledRow("项目主页", value: "jzksnsjswkw/locus-ZH")
                     }
-                    LocusLabeledRow("原始项目", value: "ChrisMack32/Locus")
+                    Link(destination: URL(string: "https://github.com/ChrisMack32/Locus")!) {
+                        LocusLabeledRow("原始项目", value: "ChrisMack32/Locus")
+                    }
                     Text("Locus 是采用 MIT 许可证的免费开源软件。定位注入使用 Apple 私有 CoreLocation 模拟 API（com.apple.locationd.simulation 权限）。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                 }
                 .locusSheetRows()
 
@@ -78,14 +80,14 @@ struct SettingsView: View {
                     } label: {
                         Text("locus，名词——地点。源自拉丁语，意为你所在之处。")
                             .font(.footnote.italic())
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                    .locusListRowSeparatorHidden()
                 }
             }
             .locusScrollContentBackgroundHidden()
@@ -94,7 +96,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
-                        dismiss()
+                        presentationMode.wrappedValue.dismiss()
                     }
                 }
             }
@@ -118,15 +120,14 @@ struct SettingsView: View {
             ) { result in
                 importBackup(result)
             }
-            .confirmationDialog(
+            .locusConfirmationDialog(
                 "导入 Locus 备份",
                 isPresented: Binding(
                     get: { pendingBackup != nil },
                     set: { if !$0 { pendingBackup = nil } }
                 ),
-                titleVisibility: .visible
-            ) {
-                Button("合并收藏与历史，并应用设置") {
+                confirmTitle: "合并收藏与历史，并应用设置",
+                onConfirm: {
                     guard let backup = pendingBackup else { return }
                     do {
                         try session.applyBackup(backup)
@@ -135,27 +136,28 @@ struct SettingsView: View {
                         backupNotice = error.localizedDescription
                     }
                     pendingBackup = nil
-                }
-                Button("取消", role: .cancel) { pendingBackup = nil }
-            } message: {
-                if let backup = pendingBackup {
-                    Text("将导入 \(backup.favorites.count) 个收藏和 \(backup.searchHistory.count) 条搜索历史；本机同坐标收藏优先保留。")
-                }
-            }
-            .alert("Locus 备份", isPresented: Binding(
-                get: { backupNotice != nil },
-                set: { if !$0 { backupNotice = nil } }
-            )) {
-                Button("确定", role: .cancel) { backupNotice = nil }
-            } message: {
-                Text(backupNotice ?? "")
-            }
-            .alert("清空搜索历史", isPresented: $confirmClearSearchHistory) {
-                Button("清空", role: .destructive) { session.clearSearchHistory() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("此操作无法撤销。")
-            }
+                },
+                message: pendingBackup.map {
+                    "将导入 \($0.favorites.count) 个收藏和 \($0.searchHistory.count) 条搜索历史；本机同坐标收藏优先保留。"
+                } ?? ""
+            )
+            .locusAlert(
+                "Locus 备份",
+                isPresented: Binding(
+                    get: { backupNotice != nil },
+                    set: { if !$0 { backupNotice = nil } }
+                ),
+                okTitle: "确定",
+                onOK: { backupNotice = nil },
+                message: backupNotice ?? ""
+            )
+            .locusConfirmAlert(
+                "清空搜索历史",
+                isPresented: $confirmClearSearchHistory,
+                confirmTitle: "清空",
+                onConfirm: { session.clearSearchHistory() },
+                message: "此操作无法撤销。"
+            )
         }
     }
 
@@ -163,20 +165,23 @@ struct SettingsView: View {
         Section {
             Picker("定位点选择方式", selection: $session.targetSelectionMode) {
                 ForEach(TargetSelectionMode.allCases) { mode in
-                    Label(mode.title, systemImage: SFSymbolCompat.resolved(mode.icon)).tag(mode)
+                    Text(mode.title).tag(mode)
                 }
             }
+            .locusPickerStyleMenu()
 
             Picker("地图样式", selection: $session.mapStyleIndex) {
                 Text("标准").tag(0)
                 Text("卫星混合").tag(1)
             }
+            .locusPickerStyleMenu()
 
             Picker("外观", selection: $session.appearanceMode) {
                 ForEach(AppAppearanceMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
+            .locusPickerStyleMenu()
 
             Toggle("地图缩放滑条", isOn: $session.zoomSliderEnabled)
             Toggle("轨迹运行时自动跟随", isOn: $session.autoFollowRoute)
@@ -187,8 +192,8 @@ struct SettingsView: View {
                 Stepper(value: $session.locationJitterRadius, in: 0.1...20, step: 0.1) {
                     LocusLabeledRow("抖动半径") {
                         Text(String(format: "%.1f 米", session.locationJitterRadius))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .locusMonospacedDigit()
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -196,8 +201,8 @@ struct SettingsView: View {
             Stepper(value: $session.locationUpdateInterval, in: 0.1...10, step: 0.1) {
                 LocusLabeledRow("定位更新间隔") {
                     Text(String(format: "%.1f 秒", session.locationUpdateInterval))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .locusMonospacedDigit()
+                        .foregroundColor(.secondary)
                 }
             }
             .onChange(of: session.locationUpdateInterval) { newValue in
@@ -208,8 +213,8 @@ struct SettingsView: View {
             Stepper(value: $session.locationUpdateJitter, in: 0...max(0.1, session.locationUpdateInterval), step: 0.1) {
                 LocusLabeledRow("更新间隔随机抖动") {
                     Text(String(format: "±%.1f 秒", session.locationUpdateJitter))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .locusMonospacedDigit()
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -222,31 +227,26 @@ struct SettingsView: View {
                                 .progressViewStyle(.linear)
                                 .frame(width: 100)
                             Text("\(session.altitudeProgress)/\(session.altitudeTotal)")
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .font(.caption2.locusMonospacedDigit())
+                                .foregroundColor(.secondary)
                         }
                     } else {
                         Text(altitudeDisplayText)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .locusMonospacedDigit()
+                            .foregroundColor(.secondary)
                     }
                 }
 
                 Picker("海拔数据源", selection: $elevationSource) {
                     ForEach(ElevationDataSource.allCases) { source in
-                        VStack(alignment: .leading) {
-                            Text(source.pickerLabel)
-                            Text(source.resolution)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .tag(source)
+                        Text(source.pickerLabel).tag(source)
                     }
                 }
+                .locusPickerStyleMenu()
 
                 Text(elevationSource.description)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
 
                 if elevationSource.requiresAPIKey {
                     SecureField(
@@ -256,8 +256,8 @@ struct SettingsView: View {
                             set: { UserDefaults.standard.setElevationAPIKey($0.isEmpty ? nil : $0, for: elevationSource) }
                         )
                     )
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .locusAutocapitalizationNever()
+                    .locusAutocorrectionDisabled()
                     if let url = elevationSource.registerURL {
                         Link("注册获取 API Key", destination: url)
                             .font(.caption)
@@ -272,10 +272,10 @@ struct SettingsView: View {
     }
 
     private var privacySection: some View {
-        Section("隐私") {
+        Section(header: Text("隐私")) {
             Text("所有数据均在设备端处理。收藏与搜索历史保存在 UserDefaults 中；无分析统计、无需账户，也不会上传任何内容。")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -301,7 +301,7 @@ struct PlacesView: View {
     }
 
     @EnvironmentObject private var session: SpoofSession
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     @State private var placeToRename: SavedPlace?
     @State private var renameText = ""
@@ -310,30 +310,23 @@ struct PlacesView: View {
         LocusNavStack {
             List {
                 if session.favorites.isEmpty {
-                    Section("收藏地点") {
+                    Section(header: Text("收藏地点")) {
                         Text("在地图上选择图钉并点击星标即可收藏。")
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.secondary)
                     }
                     .locusSheetRows()
                 } else {
                     ForEach(groupedFavorites) { group in
-                        Section(group.id) {
+                        Section(header: Text(group.id)) {
                             ForEach(group.places) { place in
                                 favoriteButton(place)
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        Button(role: .destructive) {
-                                            session.removeFavorite(place)
-                                        } label: {
-                                            Label("删除", systemImage: "trash.fill")
-                                        }
-                                        Button {
+                                    .locusFavoriteRowActions(
+                                        onDelete: { session.removeFavorite(place) },
+                                        onRename: {
                                             placeToRename = place
                                             renameText = session.favoriteDisplayName(place)
-                                        } label: {
-                                            Label("重命名", systemImage: "pencil")
                                         }
-                                        .tint(.blue)
-                                    }
+                                    )
                             }
                         }
                         .locusSheetRows()
@@ -344,12 +337,12 @@ struct PlacesView: View {
             .locusScrollContentBackgroundHidden()
             .background(Color.clear)
             .navigationTitle("收藏夹")
-            .task {
-                await session.backfillFavoriteCountries()
+            .onAppear {
+                Task { await session.backfillFavoriteCountries() }
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button("完成") { presentationMode.wrappedValue.dismiss() }
                 }
             }
             .locusRenameAlert(
@@ -395,10 +388,10 @@ struct PlacesView: View {
     private func favoriteButton(_ place: SavedPlace) -> some View {
         Button {
             session.teleport(to: place.coordinate)
-            dismiss()
+            presentationMode.wrappedValue.dismiss()
         } label: {
             Text(session.favoriteDisplayName(place))
-                .foregroundStyle(.primary)
+                .foregroundColor(.primary)
         }
     }
 

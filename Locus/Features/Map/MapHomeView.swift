@@ -28,7 +28,7 @@ struct MapHomeView: View {
     @State private var didAutoLocateOnFirstFix = false
     @State private var mapView: MKMapView?
     @State private var searchText = ""
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocused = false
     @State private var routeStart: CLLocationCoordinate2D?
     @State private var routeEnd: CLLocationCoordinate2D?
     @State private var routeWaypoints: [CLLocationCoordinate2D] = []
@@ -372,14 +372,16 @@ struct MapHomeView: View {
                     }
                 }
             )
+            .environmentObject(session)
             .locusMediumLargeDetents()
         }
-        .alert("清空搜索历史", isPresented: $confirmClearSearchHistory) {
-            Button("清空", role: .destructive) { session.clearSearchHistory() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("此操作无法撤销。")
-        }
+        .locusConfirmAlert(
+            "清空搜索历史",
+            isPresented: $confirmClearSearchHistory,
+            confirmTitle: "清空",
+            onConfirm: { session.clearSearchHistory() },
+            message: "此操作无法撤销。"
+        )
     }
 
     // MARK: - Marker overlays (positioned via MKMapView coordinate conversion)
@@ -692,7 +694,7 @@ struct MapHomeView: View {
             Rectangle()
                 .frame(width: 2, height: 30)
         }
-        .foregroundStyle(.white)
+        .foregroundColor(.white)
         .shadow(color: .black.opacity(0.75), radius: 2, y: 1)
         .frame(width: 34, height: 34)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -703,12 +705,12 @@ struct MapHomeView: View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
             TextField("搜索地点、地址或坐标", text: $searchText)
-                .textInputAutocapitalization(.words)
-                .focused($searchFocused)
-                .submitLabel(.search)
-                .onSubmit {
+                .locusAutocapitalizationWords()
+                .locusFocused($searchFocused)
+                .locusSubmitLabelSearch()
+                .locusOnSubmit {
                     searchFocused = false
                     searchTextDirectly()
                 }
@@ -723,7 +725,7 @@ struct MapHomeView: View {
                     searchFocused = true
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("清除搜索内容")
@@ -737,7 +739,7 @@ struct MapHomeView: View {
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
                 .accessibilityLabel("收起搜索")
             }
         }
@@ -757,21 +759,21 @@ struct MapHomeView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "mappin.circle.fill")
                                 .font(.body)
-                                .foregroundStyle(LocusTheme.accent)
+                                .foregroundColor(LocusTheme.accent)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.title)
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary)
+                                    .foregroundColor(.primary)
                                 if !item.subtitle.isEmpty {
                                     Text(item.subtitle)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundColor(.secondary)
                                 }
                             }
                             Spacer(minLength: 0)
                             Image(systemName: "arrow.up.left")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                                .foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14)
@@ -795,14 +797,14 @@ struct MapHomeView: View {
                 HStack {
                     Label("搜索历史", systemImage: "clock.arrow.circlepath")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                     Spacer()
                     Button {
                         confirmClearSearchHistory = true
                     } label: {
                         Label("清空", systemImage: "trash")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(LocusTheme.danger)
+                            .foregroundColor(LocusTheme.danger)
                     }
                     .buttonStyle(.plain)
                 }
@@ -818,15 +820,15 @@ struct MapHomeView: View {
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "clock.fill")
-                                    .foregroundStyle(LocusTheme.accent)
+                                    .foregroundColor(LocusTheme.accent)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.title)
                                         .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.primary)
+                                        .foregroundColor(.primary)
                                     if !entry.subtitle.isEmpty {
                                         Text(entry.subtitle)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundColor(.secondary)
                                             .lineLimit(1)
                                     }
                                 }
@@ -841,7 +843,7 @@ struct MapHomeView: View {
                             session.removeSearchHistory(entry)
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                                .foregroundColor(.secondary)
                                 .frame(width: 36, height: 44)
                         }
                         .buttonStyle(.plain)
@@ -902,7 +904,7 @@ struct MapHomeView: View {
             Image(systemName: "chevron.down")
         }
         .font(.caption2.weight(.bold))
-        .foregroundStyle(.secondary)
+        .foregroundColor(.secondary)
         .frame(width: 32, height: MapChromeLayout.rightColumnWidth * 3)
         .locusGlass(.clear, in: Capsule())
         .contentShape(Rectangle())
@@ -950,7 +952,7 @@ struct MapHomeView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(currentPinIsFavorite ? Color.yellow : Color.primary)
+            .foregroundColor(currentPinIsFavorite ? Color.yellow : Color.primary)
             .disabled(session.selectedTargetCoordinate == nil)
             .accessibilityLabel(currentPinIsFavorite ? "取消收藏" : "添加收藏")
 
@@ -991,7 +993,7 @@ struct MapHomeView: View {
         .frame(width: MapChromeLayout.rightColumnWidth)
         .locusGlass(.clear, in: Capsule())
         .contentShape(Capsule())
-        .foregroundStyle(.primary)
+        .foregroundColor(.primary)
     }
 
     private func dismissStatusDetails() {
@@ -1148,7 +1150,7 @@ struct MapHomeView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+        .foregroundColor(.primary)
     }
 
     private func toggleCurrentFavorite() {
@@ -1556,7 +1558,7 @@ private struct FavoriteMapMarker: View {
             } label: {
                 Image(systemName: "star.fill")
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(.yellow)
+                    .foregroundColor(.yellow)
                     .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
                     .frame(width: 44, height: 44)
                     .scaleEffect(isPressing ? 0.92 : 1)
@@ -1568,7 +1570,7 @@ private struct FavoriteMapMarker: View {
             if selected {
                 Label("删除收藏", systemImage: "trash.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(LocusTheme.danger)
+                    .foregroundColor(LocusTheme.danger)
                     .lineLimit(1)
                     .frame(width: 150, height: 44)
                     .contentShape(Rectangle())
@@ -1649,7 +1651,7 @@ private struct RouteEndpointMarker: View {
                 .fill(color)
             Image(systemName: systemImage)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundColor(.white)
         }
         .frame(width: 24, height: 24)
         .overlay(Circle().stroke(.white, lineWidth: 2))
@@ -1665,11 +1667,11 @@ private struct RouteWaypointMarker: View {
         ZStack {
             Image(systemName: "mappin.circle.fill")
                 .font(.title.weight(.semibold))
-                .foregroundStyle(.blue)
+                .foregroundColor(.blue)
                 .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
             Text("\(number)")
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundColor(.white)
                 .offset(y: -2)
         }
         .frame(width: 38, height: 44)

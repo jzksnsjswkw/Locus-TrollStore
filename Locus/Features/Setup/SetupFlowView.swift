@@ -24,17 +24,17 @@ struct SetupFlowView: View {
             withAnimation(.easeOut(duration: 0.7)) { appear = true }
             pulse = true
         }
-        .alert("Locus", isPresented: Binding(
-            get: { session.lastError != nil },
-            set: { if !$0 { session.lastError = nil } }
-        )) {
-            Button("确定", role: .cancel) { session.lastError = nil }
-        } message: {
-            Text(session.lastError ?? "")
-        }
+        .locusAlert(
+            "Locus",
+            isPresented: Binding(
+                get: { session.lastError != nil },
+                set: { if !$0 { session.lastError = nil } }
+            ),
+            okTitle: "确定",
+            onOK: { session.lastError = nil },
+            message: session.lastError ?? ""
+        )
     }
-
-    // MARK: - Chrome
 
     private var background: some View {
         ZStack {
@@ -99,7 +99,7 @@ struct SetupFlowView: View {
 
                     Image(systemName: "location.north.circle.fill")
                         .font(.system(size: 64, weight: .light))
-                        .foregroundStyle(LocusTheme.accent)
+                        .foregroundColor(LocusTheme.accent)
                         .opacity(appear ? 1 : 0)
                         .scaleEffect(appear ? 1 : 0.85)
                 }
@@ -111,7 +111,7 @@ struct SetupFlowView: View {
 
                     Text("瞬移到任意位置。\n无需电脑。")
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -125,7 +125,7 @@ struct SetupFlowView: View {
             VStack(spacing: 14) {
                 Text("通过 TrollStore 安装后即可开始模拟定位。")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundColor(.secondary)
 
                 primaryButton("开始使用") {
                     onFinished()
@@ -143,7 +143,7 @@ struct SetupFlowView: View {
         Button(action: action) {
             Text(title)
                 .font(.headline)
-                .foregroundStyle(.black)
+                .foregroundColor(.black)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(Capsule().fill(LocusTheme.accent))

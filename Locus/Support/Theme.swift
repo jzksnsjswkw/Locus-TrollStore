@@ -20,8 +20,13 @@ enum LocusGlassStyle {
 /// stronger native material so labels remain readable over the system glass.
 private struct LocusSheetRowBackground: View {
     var body: some View {
-        Rectangle()
-            .fill(.thickMaterial)
+        if #available(iOS 15.0, *) {
+            Rectangle()
+                .fill(.thickMaterial)
+        } else {
+            Rectangle()
+                .fill(Color(UIColor.secondarySystemGroupedBackground).opacity(0.9))
+        }
     }
 }
 
@@ -37,7 +42,7 @@ struct LocusGlassModifier<S: Shape>: ViewModifier {
                 .glassEffect(glass, in: shape)
                 // Glass draws outside the layout bounds; expand hit-testing to match.
                 .contentShape(shape)
-        } else {
+        } else if #available(iOS 15.0, *) {
             content
                 .background {
                     shape.fill(.ultraThinMaterial)
@@ -45,6 +50,18 @@ struct LocusGlassModifier<S: Shape>: ViewModifier {
                         shape.fill(tint.opacity(0.55))
                     }
                 }
+                .overlay(shape.stroke(LocusTheme.panelStroke, lineWidth: 1))
+                .contentShape(shape)
+        } else {
+            content
+                .background(
+                    ZStack {
+                        shape.fill(Color(UIColor.systemBackground).opacity(0.6))
+                        if let tint {
+                            shape.fill(tint.opacity(0.55))
+                        }
+                    }
+                )
                 .overlay(shape.stroke(LocusTheme.panelStroke, lineWidth: 1))
                 .contentShape(shape)
         }

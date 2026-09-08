@@ -43,7 +43,7 @@ struct LocusLabeledRow<Value: View>: View {
                 Spacer(minLength: 12)
                 value
                     .multilineTextAlignment(.trailing)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -86,17 +86,311 @@ enum LegacyCompatibility {
             UITableView.appearance().backgroundColor = .clear
         }
     }
+
+    // iOS 14 has no listRowSeparator(.hidden); clear separators globally.
+    static func applyHiddenSeparators() {
+        if #unavailable(iOS 15.0) {
+            UITableView.appearance().separatorColor = .clear
+        }
+    }
 }
 
-enum SFSymbolCompat {
-    // SF Symbols 4 glyphs render blank on iOS 15; fall back to the closest
-    // SF Symbols 3 equivalents there.
+/// TimelineView on iOS 15+; Timer-driven backport on iOS 14.
+/// Only the closure's `date` is consumed by call sites, so a plain ticking
+/// date reproduces the same output at either interval granularity.
+struct LocusTimelineView<Content: View>: View {
+    private let interval: TimeInterval
+    private let content: (Date) -> Content
+
+    @State private var now: Date = Date()
+
+    init(
+        _ interval: TimeInterval,
+        @ViewBuilder content: @escaping (Date) -> Content
+    ) {
+        self.interval = interval
+        self.content = content
+    }
+
+    var body: some View {
+        if #available(iOS 15.0, *) {
+            TimelineView(.periodic(from: .now, by: max(interval, 0.001))) { context in
+                content(context.date)
+            }
+        } else {
+            content(now)
+                .onReceive(
+                    Timer.publish(every: max(interval, 0.001), on: .main, in: .common).autoconnect()
+                ) { date in
+                    now = date
+                }
+        }
+    }
+}
+
+/// FocusState is iOS 15+; bind a plain Binding<Bool> to real keyboard focus
+/// there and degrade to a no-op on iOS 14 (the search UI still toggles via
+/// the binding).
+@available(iOS 15.0, *)
+private struct LocusFocused15: ViewModifier {
+    @Binding var isFocused: Bool
+    @FocusState private var focus: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focused($focus)
+            .onChange(of: isFocused) { newValue in
+                if newValue && !focus { focus = true }
+            }
+            .onChange(of: focus) { focused in
+                if focused != isFocused { isFocused = focused }
+            }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func locusFocused(_ isFocused: Binding<Bool>) -> some View {
+        if #available(iOS 15.0, *) {
+            modifier(LocusFocused15(isFocused: isFocused))
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func locusAutocapitalizationNever() -> some View {
+        if #available(iOS 15.0, *) {
+            textInputAutocapitalization(.never)
+        } else {
+            autocapitalization(.none)
+        }
+    }
+
+    @ViewBuilder
+    func locusAutocapitalizationWords() -> some View {
+        if #available(iOS 15.0, *) {
+            textInputAutocapitalization(.words)
+        } else {
+            autocapitalization(.words)
+        }
+    }
+
+    @ViewBuilder
+    func locusAutocorrectionDisabled() -> some View {
+        if #available(iOS 15.0, *) {
+            autocorrectionDisabled()
+        } else {
+            disableAutocorrection(true)
+        }
+    }
+
+    @ViewBuilder
+    func locusSubmitLabelSearch() -> some View {
+        if #available(iOS 15.0, *) {
+            submitLabel(.search)
+        } else {
+            self
+        }
+    }
+
+    /// Alert with a single OK button (the modern `alert(_:isPresented:actions:message:)`
+    /// is iOS 15+; fall back to `Alert` on iOS 14).
+    @ViewBuilder
+    func locusAlert(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        okTitle: String,
+        onOK: @escaping () -> Void,
+        message: String
+    ) -> some View {
+        if #available(iOS 15.0, *) {
+            alert(title, isPresented: isPresented) {
+                Button(okTitle, role: .cancel) { onOK() }
+            } message: {
+                Text(message)
+            }
+        } else {
+            alert(isPresented: isPresented) {
+                Alert(
+                    title: Text(title),
+                    message: Text(message),
+                    dismissButton: .default(Text(okTitle)) { onOK() }
+                )
+            }
+        }
+    }
+
+    /// Alert with a destructive confirm + cancel.
+    @ViewBuilder
+    func locusConfirmAlert(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        confirmTitle: String,
+        onConfirm: @escaping () -> Void,
+        message: String
+    ) -> some View {
+        if #available(iOS 15.0, *) {
+            alert(title, isPresented: isPresented) {
+                Button(confirmTitle, role: .destructive) { onConfirm() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(message)
+            }
+        } else {
+            alert(isPresented: isPresented) {
+                Alert(
+                    title: Text(title),
+                    message: Text(message),
+                    primaryButton: .destructive(Text(confirmTitle)) { onConfirm() },
+                    secondaryButton: .cancel()
+                )
+            }
+        }
+    }
+
+    /// confirmationDialog on iOS 15+; actionSheet on iOS 14.
+    @ViewBuilder
+    func locusConfirmationDialog(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        confirmTitle: String,
+        onConfirm: @escaping () -> Void,
+        cancelTitle: String = "取消",
+        message: String
+    ) -> some View {
+        if #available(iOS 15.0, *) {
+            confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
+                Button(confirmTitle) { onConfirm() }
+                Button(cancelTitle, role: .cancel) {}
+            } message: {
+                Text(message)
+            }
+        } else {
+            actionSheet(isPresented: isPresented) {
+                ActionSheet(
+                    title: Text(title),
+                    message: Text(message),
+                    buttons: [
+                        .default(Text(confirmTitle)) { onConfirm() },
+                        .cancel()
+                    ]
+                )
+            }
+        }
+    }
+
+    /// monospacedDigit() is iOS 15+; no-op on iOS 14.
+    @ViewBuilder
+    func locusMonospacedDigit() -> some View {
+        if #available(iOS 15.0, *) {
+            monospacedDigit()
+        } else {
+            self
+        }
+    }
+
+    /// tint() is iOS 16+; fall back to accentColor on older.
+    @ViewBuilder
+    func locusTint(_ color: Color) -> some View {
+        if #available(iOS 16.0, *) {
+            tint(color)
+        } else {
+            accentColor(color)
+        }
+    }
+
+    /// listRowSeparator(.hidden) is iOS 15+; clear separators globally on iOS 14.
+    func locusListRowSeparatorHidden() -> some View {
+        LegacyCompatibility.applyHiddenSeparators()
+        return Group {
+            if #available(iOS 15.0, *) {
+                listRowSeparator(.hidden)
+            } else {
+                self
+            }
+        }
+    }
+
+    /// onSubmit is iOS 15+; no-op on iOS 14 (keyboard return just dismisses).
+    @ViewBuilder
+    func locusOnSubmit(_ action: @escaping () -> Void) -> some View {
+        if #available(iOS 15.0, *) {
+            onSubmit(action)
+        } else {
+            self
+        }
+    }
+
+    /// Menu pickers render the selected value in the system accent blue on
+    /// iOS 14 and iOS 16+; keep that platform-default look on iOS 14, but
+    /// neutralize it to the secondary gray on iOS 15+ where the platform
+    /// default is gray.
+    @ViewBuilder
+    func locusPickerStyleMenu() -> some View {
+        if #available(iOS 15.0, *) {
+            pickerStyle(.menu)
+                .accentColor(.secondary)
+        } else {
+            pickerStyle(.menu)
+        }
+    }
+
+    /// Favorite row actions: swipe actions on iOS 15+, context-menu fallback on iOS 14.
+    @ViewBuilder
+    func locusFavoriteRowActions(
+        onDelete: @escaping () -> Void,
+        onRename: @escaping () -> Void
+    ) -> some View {
+        if #available(iOS 15.0, *) {
+            swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { onDelete() } label: {
+                    Label("删除", systemImage: "trash.fill")
+                }
+                Button { onRename() } label: {
+                    Label("重命名", systemImage: "pencil")
+                }
+            }
+        } else {
+            contextMenu {
+                Button(action: { onDelete() }) {
+                    Label("删除", systemImage: "trash.fill")
+                }
+                Button(action: { onRename() }) {
+                    Label("重命名", systemImage: "pencil")
+                }
+            }
+        }
+    }
+}
+
+extension Font {
+    /// monospacedDigit() on Font is iOS 15+; plain on iOS 14.
+    func locusMonospacedDigit() -> Font {
+        if #available(iOS 15.0, *) { return monospacedDigit() }
+        return self
+    }
+}
+
+enum SFSymbolCompat {    // SF Symbols 4 glyphs render blank on iOS 15; fall back to the closest
+    // SF Symbols 3 equivalents there. On iOS 14, SF Symbols 3 glyphs are also
+    // missing, so fall back to SF Symbols 1/2 names.
     static func resolved(_ name: String) -> String {
         if #available(iOS 16.0, *) { return name }
+        if #available(iOS 15.0, *) {
+            switch name {
+            case "figure.run": return "hare.fill"
+            case "square.3.layers.3d": return "square.stack.3d.up.fill"
+            case "road.lanes": return "point.topleft.down.curvedto.point.bottomright.up"
+            default: return name
+            }
+        }
         switch name {
         case "figure.run": return "hare.fill"
+        case "figure.walk": return "figure.walk"
         case "square.3.layers.3d": return "square.stack.3d.up.fill"
-        case "road.lanes": return "point.topleft.down.curvedto.point.bottomright.up"
+        case "road.lanes": return "arrow.up.right"
+        case "speedometer": return "dial"
         default: return name
         }
     }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Full-screen easter egg: a swarm of locusts (the bugs) scurries across the void.
 /// Spelling optional. Humor mandatory.
 struct LocusEasterEggView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     private let swarm: [Critter] = [
         .init(band: 0.10, size: 36, speed: 0.14, reverse: false, bob: 10),
@@ -38,8 +38,8 @@ struct LocusEasterEggView: View {
                 )
                 .ignoresSafeArea()
 
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: false)) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate
+                LocusTimelineView(1.0 / 30.0) { date in
+                    let t = date.timeIntervalSinceReferenceDate
                     ZStack {
                         ForEach(Array(swarm.enumerated()), id: \.offset) { index, critter in
                             critterView(critter, index: index, time: t, size: geo.size)
@@ -52,11 +52,11 @@ struct LocusEasterEggView: View {
                     HStack {
                         Spacer()
                         Button {
-                            dismiss()
+                            presentationMode.wrappedValue.dismiss()
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.body.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundColor(.primary)
                                 .frame(width: 36, height: 36)
                                 .contentShape(Circle())
                         }
@@ -69,7 +69,7 @@ struct LocusEasterEggView: View {
 
                     Text("差不多吧")
                         .font(.caption.italic())
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundColor(.white.opacity(0.35))
                         .padding(.bottom, 28)
                 }
             }

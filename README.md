@@ -2,7 +2,7 @@
 
 免费开源的 iPhone 虚拟定位工具。点一下地图、搜索一个地点，或者规划一条路线——Locus 通过苹果的私有 **CLSimulationManager** 接口把模拟坐标注入系统定位服务 `locationd`，让地图 App 和其他应用看到的是你设定的位置（而不是那种室外 GPS 一刷新就覆盖掉的 Wi‑Fi 定位）。
 
-支持 **iOS 15.0 及以上**。用 **TrollStore** 安装即可——不需要配对文件、不需要开发者通道、不需要电脑、也不需要开启开发者模式。
+支持 **iOS 14.0 及以上**。用 **TrollStore** 安装即可——不需要配对文件、不需要开发者通道、不需要电脑、也不需要开启开发者模式。
 
 <p align="center">
   <img src="docs/screenshots/map.png" alt="Locus 地图定位界面" width="180" />

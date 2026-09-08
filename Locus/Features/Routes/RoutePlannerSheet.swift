@@ -9,20 +9,20 @@ struct RoutePlannerSheet: View {
     var onToggleDrawing: () -> Void
 
     @EnvironmentObject private var session: SpoofSession
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     var body: some View {
         LocusNavStack {
             List {
-                Section("速度与循环") {
+                Section(header: Text("速度与循环")) {
                     TravelModeSelector()
                         .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                     HStack {
-                        Label("速度", systemImage: "speedometer")
+                        Label("速度", systemImage: SFSymbolCompat.resolved("speedometer"))
                         Spacer()
                         Text(String(format: "%.2fx · %.1f km/h", session.speedMultiplier, session.travelMode.baseSpeed * session.speedMultiplier * 3.6))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .font(.caption.locusMonospacedDigit())
+                            .foregroundColor(.secondary)
                     }
                     Slider(value: $session.speedMultiplier, in: 0.25...4.0, step: 0.25)
                     Toggle(isOn: $session.routeLoopEnabled) {
@@ -35,10 +35,10 @@ struct RoutePlannerSheet: View {
                 }
                 .locusSheetRows()
 
-                Section("地图手绘") {
+                Section(header: Text("地图手绘")) {
                     Button {
                         onToggleDrawing()
-                        dismiss()
+                        presentationMode.wrappedValue.dismiss()
                     } label: {
                         Label(
                             drawMode ? "返回地图继续手绘" : "开始地图手绘",
@@ -47,11 +47,11 @@ struct RoutePlannerSheet: View {
                     }
                     Text("开始后可直接在地图底部撤回、保存或取消，无需返回此页面。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                 }
                 .locusSheetRows()
 
-                Section("运行与 GPX") {
+                Section(header: Text("运行与 GPX")) {
                     Button(action: onPlay) {
                         Label("开始运行轨迹", systemImage: "play.fill")
                     }
@@ -64,7 +64,7 @@ struct RoutePlannerSheet: View {
                 }
                 .locusSheetRows()
 
-                Section("生成轨迹") {
+                Section(header: Text("生成轨迹")) {
                     if session.targetSelectionMode == .crosshair {
                         Button(action: onBuildRouteToTarget) {
                             Label("从当前位置生成至准星的轨迹", systemImage: "scope")
@@ -76,7 +76,7 @@ struct RoutePlannerSheet: View {
                          ? "当前模拟位置或真实位置作为起点，屏幕中央准星作为终点。"
                          : "当前模拟位置或真实位置作为起点，红图钉作为终点。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                 }
                 .locusSheetRows()
             }
@@ -85,7 +85,7 @@ struct RoutePlannerSheet: View {
             .navigationTitle("轨迹")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button("完成") { presentationMode.wrappedValue.dismiss() }
                 }
             }
         }
