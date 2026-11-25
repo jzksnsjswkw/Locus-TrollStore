@@ -25,12 +25,12 @@ enum ElevationDataSource: String, CaseIterable, Codable, Identifiable {
 
     var recommendationTag: String? {
         switch self {
-        case .openMeteo: return "推荐 快速"
-        case .kuonGEO: return "推荐 高精度"
-        case .elevationApiEu: return "推荐"
-        case .openTopoData: return "高精度"
+        case .openMeteo: return L("推荐 快速")
+        case .kuonGEO: return L("推荐 高精度")
+        case .elevationApiEu: return L("推荐")
+        case .openTopoData: return L("高精度")
         case .openTopography: return nil
-        case .esri: return "高精度"
+        case .esri: return L("高精度")
         case .googleMaps: return nil
         }
     }
@@ -84,13 +84,13 @@ enum ElevationDataSource: String, CaseIterable, Codable, Identifiable {
 
     var description: String {
         switch self {
-        case .openMeteo: return "\(pickerLabel) · \(resolution) · 免费"
-        case .kuonGEO: return "\(pickerLabel) · \(resolution) · 免费无限制"
-        case .elevationApiEu: return "\(pickerLabel) · \(resolution) · 免费，10次/秒"
-        case .openTopoData: return "\(pickerLabel) · \(resolution) · 免费，限速 1次/秒、1000次/天"
-        case .openTopography: return "\(pickerLabel) · \(resolution) · 需 Key，免费 限 50次/天"
-        case .esri: return "\(pickerLabel) · \(resolution) · 需 Key，免费 5万次/月"
-        case .googleMaps: return "Google 官方 Elevation API · \(resolution) · 按量付费"
+        case .openMeteo: return L("%@ · %@ · 免费", "\(pickerLabel)", "\(resolution)")
+        case .kuonGEO: return L("%@ · %@ · 免费无限制", "\(pickerLabel)", "\(resolution)")
+        case .elevationApiEu: return L("%@ · %@ · 免费，10次/秒", "\(pickerLabel)", "\(resolution)")
+        case .openTopoData: return L("%@ · %@ · 免费，限速 1次/秒、1000次/天", "\(pickerLabel)", "\(resolution)")
+        case .openTopography: return L("%@ · %@ · 需 Key，免费 限 50次/天", "\(pickerLabel)", "\(resolution)")
+        case .esri: return L("%@ · %@ · 需 Key，免费 5万次/月", "\(pickerLabel)", "\(resolution)")
+        case .googleMaps: return L("Google 官方 Elevation API · %@ · 按量付费", "\(resolution)")
         }
     }
 }

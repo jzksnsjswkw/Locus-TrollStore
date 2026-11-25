@@ -36,7 +36,7 @@ struct JoystickPad: View {
                         }
                 )
         }
-        .accessibilityLabel("移动摇杆")
+        .accessibilityLabel(L("移动摇杆"))
     }
 
     private func clamp(_ translation: CGSize, radius: CGFloat) -> CGSize {

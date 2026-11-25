@@ -69,12 +69,12 @@ struct MapDropPin: View {
 
     private var pinActionMenu: some View {
         HStack(spacing: 0) {
-            actionButton("删除", systemImage: "trash.fill", color: LocusTheme.danger, width: 78, action: onRemove)
+            actionButton(L("删除"), systemImage: "trash.fill", color: LocusTheme.danger, width: 78, action: onRemove)
             if expandedActions {
                 Divider()
                     .overlay(Color.white.opacity(0.25))
                     .frame(height: 28)
-                actionButton("生成轨迹", systemImage: SFSymbolCompat.resolved("road.lanes"), color: .blue, width: 112, action: onBuildRouteToPin)
+                actionButton(L("生成轨迹"), systemImage: SFSymbolCompat.resolved("road.lanes"), color: .blue, width: 112, action: onBuildRouteToPin)
             }
         }
         .padding(.horizontal, 4)

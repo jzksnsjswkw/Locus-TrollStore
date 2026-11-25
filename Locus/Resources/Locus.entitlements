@@ -1,12 +1,40 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>platform-application</key>
 	<true/>
+	<!--
+	  no-container / no-sandbox are required by locationd for coordinate
+	  injection; removing either breaks CLSimulationManager (verified on device).
+
+	  They do not, on their own, grant filesystem access: without an explicit
+	  sandbox exception every read is denied, including the app's own container.
+	  That is why UIDocumentPickerViewController could not materialise a file and
+	  why scanning directories found nothing readable.
+
+	  com.apple.security.exception.files.absolute-path.read-write below is what
+	  actually allows reading files outside the container. It is the same key
+	  Geranium (another TrollStore location simulator signed no-container +
+	  no-sandbox, so it faces the identical constraint) ships with.
+
+	  The storage.* / container-manager keys let the app resolve container and
+	  Mobile Documents paths, which is what makes the document picker and the
+	  Files.app folder work.
+	-->
 	<key>com.apple.private.security.no-container</key>
 	<true/>
 	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>com.apple.security.exception.files.absolute-path.read-write</key>
+	<array>
+		<string>/</string>
+	</array>
+	<key>com.apple.private.security.container-manager</key>
+	<true/>
+	<key>com.apple.private.security.storage.AppDataContainers</key>
+	<true/>
+	<key>com.apple.private.security.storage.MobileDocuments</key>
 	<true/>
 	<key>com.apple.locationd.simulation</key>
 	<true/>

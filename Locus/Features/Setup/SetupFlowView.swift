@@ -30,7 +30,7 @@ struct SetupFlowView: View {
                 get: { session.lastError != nil },
                 set: { if !$0 { session.lastError = nil } }
             ),
-            okTitle: "确定",
+            okTitle: L("确定"),
             onOK: { session.lastError = nil },
             message: session.lastError ?? ""
         )
@@ -109,7 +109,7 @@ struct SetupFlowView: View {
                         .font(.system(size: 48, weight: .bold, design: .rounded))
                         .tracking(-0.5)
 
-                    Text("瞬移到任意位置。\n无需电脑。")
+                    Text(L("瞬移到任意位置。\n无需电脑。"))
                         .font(.title3)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -123,11 +123,11 @@ struct SetupFlowView: View {
             Spacer()
 
             VStack(spacing: 14) {
-                Text("通过 TrollStore 安装后即可开始模拟定位。")
+                Text(L("通过 TrollStore 安装后即可开始模拟定位。"))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                primaryButton("开始使用") {
+                primaryButton(L("开始使用")) {
                     onFinished()
                 }
             }

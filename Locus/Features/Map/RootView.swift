@@ -21,6 +21,7 @@ enum MapChromeLayout {
 
 struct RootView: View {
     @EnvironmentObject private var session: SpoofSession
+    @EnvironmentObject private var languageStore: LocusLanguageStore
     @State private var showSettings = false
     @State private var showPlaces = false
     @State private var favoriteRenameSuggestion: SavedPlace?
@@ -34,6 +35,9 @@ struct RootView: View {
     @State private var selectedRouteOptionID: UUID?
     @State private var drawingRouteActive = false
     @State private var drawingRoutePointCount = 0
+    /// True when the route on screen came from the drawing tool, so the route
+    /// bar can offer "continue editing" instead of a plain replay.
+    @State private var routeIsHandDrawn = false
 
     var body: some View {
         // Bottom chrome is a sibling overlay aligned to the bottom — no full-screen
@@ -48,7 +52,8 @@ struct RootView: View {
                 routeOptions: $routeOptions,
                 selectedRouteOptionID: $selectedRouteOptionID,
                 drawingRouteActive: $drawingRouteActive,
-                drawingRoutePointCount: $drawingRoutePointCount
+                drawingRoutePointCount: $drawingRoutePointCount,
+                routeIsHandDrawnPublished: $routeIsHandDrawn
             )
             .allowsHitTesting(!(session.altitudeLoading && session.routeActive))
 
@@ -68,10 +73,17 @@ struct RootView: View {
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                                     .zIndex(10)
                             } else if generatedRouteReady {
-                                generatedRouteControls
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                                    .zIndex(10)
+                                if routeIsHandDrawn {
+                                    handDrawnRouteControls
+                                        .frame(maxWidth: .infinity, alignment: .center)
+                                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                                        .zIndex(10)
+                                } else {
+                                    generatedRouteControls
+                                        .frame(maxWidth: .infinity, alignment: .center)
+                                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                                        .zIndex(10)
+                                }
                                 if routeOptions.count > 1 {
                                     routeChoiceControls
                                         .frame(maxWidth: .infinity, alignment: .center)
@@ -106,7 +118,7 @@ struct RootView: View {
                             ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
                                 .progressViewStyle(.linear)
                                 .frame(width: 200)
-                            Text("获取路线海拔 \(session.altitudeProgress)/\(session.altitudeTotal)")
+                            Text(L("获取路线海拔 %@/%@", "\(session.altitudeProgress)", "\(session.altitudeTotal)"))
                                 .font(.caption.weight(.medium))
                                 .foregroundColor(.secondary)
                                 .locusMonospacedDigit()
@@ -120,11 +132,13 @@ struct RootView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .environmentObject(session)
+            .environmentObject(languageStore)
                 .locusMediumLargeDetents()
         }
         .sheet(isPresented: $showPlaces) {
             PlacesView()
                 .environmentObject(session)
+            .environmentObject(languageStore)
                 .locusMediumLargeDetents()
         }
         .locusAlert(
@@ -133,7 +147,7 @@ struct RootView: View {
                 get: { session.lastError != nil },
                 set: { if !$0 { session.lastError = nil } }
             ),
-            okTitle: "确定",
+            okTitle: L("确定"),
             onOK: { session.lastError = nil },
             message: session.lastError ?? ""
         )
@@ -142,8 +156,8 @@ struct RootView: View {
                 get: { favoriteToRename != nil },
                 set: { if !$0 { favoriteToRename = nil } }
             ),
-            title: "重命名收藏",
-            message: "输入一个方便识别的地点名称。",
+            title: L("重命名收藏"),
+            message: L("输入一个方便识别的地点名称。"),
             text: $favoriteRenameText
         ) {
             if let favoriteToRename {
@@ -193,7 +207,7 @@ struct RootView: View {
             height: MapChromeLayout.rightColumnWidth
         )
         .clipShape(Circle())
-        .accessibilityLabel("搜索地点")
+        .accessibilityLabel(L("搜索地点"))
     }
 
     private func dismissStatusDetails() {
@@ -211,7 +225,7 @@ struct RootView: View {
                 favoriteRenameSuggestion = nil
             }
         } label: {
-            Label("重命名“\(session.favoriteDisplayName(favorite))”", systemImage: "pencil")
+            Label(L("重命名“%@”", "\(session.favoriteDisplayName(favorite))"), systemImage: "pencil")
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(LocusTheme.danger)
                 .lineLimit(1)
@@ -222,7 +236,7 @@ struct RootView: View {
         .buttonStyle(.plain)
         .locusGlass(.interactive, in: Capsule())
         .contentShape(Rectangle())
-        .accessibilityHint("五秒内轻点即可自定义收藏名称")
+        .accessibilityHint(L("五秒内轻点即可自定义收藏名称"))
     }
 
     private var generatedRouteControls: some View {
@@ -231,7 +245,7 @@ struct RootView: View {
                 dismissStatusDetails()
                 NotificationCenter.default.post(name: .locusDeleteRoute, object: nil)
             } label: {
-                Label("删除", systemImage: "trash.fill")
+                Label(L("删除"), systemImage: "trash.fill")
                     .foregroundColor(LocusTheme.danger)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
@@ -246,7 +260,7 @@ struct RootView: View {
                 dismissStatusDetails()
                 NotificationCenter.default.post(name: .locusRunRoute, object: nil)
             } label: {
-                Label("运行", systemImage: "play.fill")
+                Label(L("运行"), systemImage: "play.fill")
                     .foregroundColor(.blue)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
@@ -261,6 +275,59 @@ struct RootView: View {
         .contentShape(Rectangle().inset(by: -MapChromeLayout.routeRowSpacing))
     }
 
+    /// Route bar for a hand-drawn track: it can be re-opened for editing where
+    /// drawing left off, which the plain play/delete bar cannot do.
+    private var handDrawnRouteControls: some View {
+        HStack(spacing: 0) {
+            Button {
+                dismissStatusDetails()
+                NotificationCenter.default.post(name: .locusDeleteRoute, object: nil)
+            } label: {
+                Label(L("删除"), systemImage: "trash.fill")
+                    .foregroundColor(LocusTheme.danger)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .frame(maxHeight: .infinity)
+
+            Divider()
+                .overlay(Color.white.opacity(0.25))
+                .frame(height: 28)
+
+            Button {
+                dismissStatusDetails()
+                NotificationCenter.default.post(name: .locusEditDrawingRoute, object: nil)
+            } label: {
+                Label(L("编辑"), systemImage: "pencil.tip")
+                    .foregroundColor(LocusTheme.accentSecondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .frame(maxHeight: .infinity)
+
+            Divider()
+                .overlay(Color.white.opacity(0.25))
+                .frame(height: 28)
+
+            Button {
+                dismissStatusDetails()
+                NotificationCenter.default.post(name: .locusRunRoute, object: nil)
+            } label: {
+                Label(L("运行"), systemImage: "play.fill")
+                    .foregroundColor(.blue)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .font(.caption.weight(.bold))
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .frame(width: 300, height: 50)
+        .locusGlass(.regular, in: Capsule())
+        .contentShape(Rectangle().inset(by: -MapChromeLayout.routeRowSpacing))
+    }
+
     private var routeChoiceControls: some View {
         HStack(spacing: 6) {
             ForEach(routeOptions) { option in
@@ -271,7 +338,7 @@ struct RootView: View {
                     UISelectionFeedbackGenerator().selectionChanged()
                 } label: {
                     VStack(spacing: 1) {
-                        Text("路线 \(index + 1)")
+                        Text(L("路线 %@", "\(index + 1)"))
                             .font(.caption.weight(.bold))
                         Text(routeOptionDetail(option))
                             .font(.caption2.locusMonospacedDigit())
@@ -306,12 +373,12 @@ struct RootView: View {
         let distance = option.distance >= 1_000
             ? String(format: "%.1f km", option.distance / 1_000)
             : "\(Int(option.distance.rounded())) m"
-        return "\(minutes) 分 · \(distance)"
+        return L("%@ 分 · %@", "\(minutes)", "\(distance)")
     }
 
     private var drawingRouteControls: some View {
         HStack(spacing: 0) {
-            drawingActionButton("取消", systemImage: "xmark", color: LocusTheme.danger) {
+            drawingActionButton(L("取消"), systemImage: "xmark", color: LocusTheme.danger) {
                 NotificationCenter.default.post(name: .locusCancelDrawingRoute, object: nil)
             }
 
@@ -319,7 +386,7 @@ struct RootView: View {
                 .overlay(Color.white.opacity(0.25))
                 .frame(height: 28)
 
-            drawingActionButton("撤回", systemImage: "arrow.uturn.backward", color: .orange) {
+            drawingActionButton(L("撤回"), systemImage: "arrow.uturn.backward", color: .orange) {
                 NotificationCenter.default.post(name: .locusUndoDrawingPoint, object: nil)
             }
             .disabled(drawingRoutePointCount == 0)
@@ -328,7 +395,7 @@ struct RootView: View {
                 .overlay(Color.white.opacity(0.25))
                 .frame(height: 28)
 
-            drawingActionButton("保存", systemImage: "checkmark", color: .blue) {
+            drawingActionButton(L("保存"), systemImage: "checkmark", color: .blue) {
                 NotificationCenter.default.post(name: .locusSaveDrawingRoute, object: nil)
             }
             .disabled(drawingRoutePointCount < 2)
@@ -377,13 +444,13 @@ struct StatusBarView: View {
         case .idle:
             return .notSpoofing
         case .connecting:
-            return .status("正在连接…")
+            return .status(L("正在连接…"))
         case .active:
-            return .status("正在模拟定位")
+            return .status(L("正在模拟定位"))
         case .reconnecting:
-            return .status("正在重新连接…")
+            return .status(L("正在重新连接…"))
         case .dropped(let reason):
-            return .status(reason.isEmpty ? "连接已断开" : "连接已断开 — \(reason)")
+            return .status(reason.isEmpty ? L("连接已断开") : L("连接已断开 — %@", "\(reason)"))
         }
     }
 
@@ -403,7 +470,7 @@ struct StatusBarView: View {
 
     private var title: String {
         switch display {
-        case .notSpoofing: return "未模拟定位"
+        case .notSpoofing: return L("未模拟定位")
         case .status(let text): return text
         }
     }
@@ -491,14 +558,14 @@ struct StatusBarView: View {
     private var locationDetailsCard: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
-                Label("位置信息", systemImage: "mappin.and.ellipse")
+                Label(L("位置信息"), systemImage: "mappin.and.ellipse")
                     .font(.subheadline.weight(.semibold))
                 Spacer(minLength: 6)
                 Button {
                     UIPasteboard.general.string = locationCopyText
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
-                    Label("复制", systemImage: "doc.on.doc")
+                    Label(L("复制"), systemImage: "doc.on.doc")
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 9)
                         .frame(height: 30)
@@ -515,30 +582,30 @@ struct StatusBarView: View {
                 .lineLimit(2)
 
             HStack(spacing: 12) {
-                locationDetailValue("国家", locationSummary.country)
-                locationDetailValue("城市", locationSummary.city)
-                locationDetailValue("邮编", locationSummary.postalCode)
+                locationDetailValue(L("国家"), locationSummary.country)
+                locationDetailValue(L("城市"), locationSummary.city)
+                locationDetailValue(L("邮编"), locationSummary.postalCode)
             }
 
             HStack(spacing: 8) {
-                Label("地图数据源", systemImage: "map.fill")
+                Label(L("地图数据源"), systemImage: "map.fill")
                 Spacer(minLength: 4)
                 HStack(spacing: 5) {
                     mapDataSourceBadge("Apple", isActive: mapDataSourceDetector.source == .apple)
-                    mapDataSourceBadge("高德", isActive: mapDataSourceDetector.source == .amap)
+                    mapDataSourceBadge(L("高德"), isActive: mapDataSourceDetector.source == .amap)
                 }
             }
             .font(.caption2)
             .foregroundColor(.secondary)
 
             LocusTimelineView(60) { date in
-                Label("当地时间：\(locationSummary.localTimeString(at: date))", systemImage: "clock")
+                Label(L("当地时间：%@", "\(locationSummary.localTimeString(at: date))"), systemImage: "clock")
                     .font(.caption2.locusMonospacedDigit())
                     .foregroundColor(.secondary)
             }
 
             if let coordinate = locationSummary.coordinate {
-                Text("纬度：\(latitudeText(coordinate.latitude))  经度：\(longitudeText(coordinate.longitude))")
+                Text(L("纬度：%@  经度：%@", "\(latitudeText(coordinate.latitude))", "\(longitudeText(coordinate.longitude))"))
                     .font(.caption2.locusMonospacedDigit())
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -549,13 +616,13 @@ struct StatusBarView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
                             .progressViewStyle(.linear)
-                        Text("海拔加载中 \(session.altitudeProgress)/\(session.altitudeTotal)")
+                        Text(L("海拔加载中 %@/%@", "\(session.altitudeProgress)", "\(session.altitudeTotal)"))
                             .font(.caption2.locusMonospacedDigit())
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: 120)
                 } else if let altitude = session.simulatedAltitude {
-                    Text("海拔：\(altitudeText(altitude))")
+                    Text(L("海拔：%@", "\(altitudeText(altitude))"))
                         .font(.caption2.locusMonospacedDigit())
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -581,17 +648,17 @@ struct StatusBarView: View {
 
     private var locationCopyText: String {
         let coordinate = locationSummary.coordinate.map {
-            "纬度：\(latitudeText($0.latitude))\n经度：\(longitudeText($0.longitude))"
+            L("纬度：%@\n经度：%@", "\(latitudeText($0.latitude))", "\(longitudeText($0.longitude))")
         } ?? ""
         return [
             locationSummary.formattedAddress,
-            "国家：\(locationSummary.country)",
-            "城市：\(locationSummary.city)",
-            "邮编：\(locationSummary.postalCode)",
+            L("国家：%@", "\(locationSummary.country)"),
+            L("城市：%@", "\(locationSummary.city)"),
+            L("邮编：%@", "\(locationSummary.postalCode)"),
             mapDataSourceCopyLine,
             coordinate,
             (session.altitudeEnabled ? session.simulatedAltitude : nil)
-                .map { "海拔：\(altitudeText($0))" }
+                .map { L("海拔：%@", "\(altitudeText($0))") }
         ]
         .compactMap { $0 }
         .filter { !$0.isEmpty }
@@ -607,7 +674,7 @@ struct StatusBarView: View {
     }
 
     private func altitudeText(_ altitude: CLLocationDistance) -> String {
-        String(format: "%.0f 米", altitude)
+        String(format: L("%.0f 米"), altitude)
     }
 
     private var mapDataSourceName: String {
@@ -615,8 +682,8 @@ struct StatusBarView: View {
     }
 
     private var mapDataSourceCopyLine: String {
-        guard !mapDataSourceName.isEmpty else { return "地图数据源：Apple / 高德" }
-        return "地图数据源：Apple / 高德（当前：\(mapDataSourceName)）"
+        guard !mapDataSourceName.isEmpty else { return L("地图数据源：Apple / 高德") }
+        return L("地图数据源：Apple / 高德（当前：%@）", "\(mapDataSourceName)")
     }
 
     @ViewBuilder
@@ -676,10 +743,10 @@ struct StatusBarView: View {
 
 @MainActor
 private final class MapLocationSummary: ObservableObject {
-    @Published private(set) var country = "正在获取"
-    @Published private(set) var city = "地区"
+    @Published private(set) var country = L("正在获取")
+    @Published private(set) var city = L("地区")
     @Published private(set) var postalCode = "—"
-    @Published private(set) var formattedAddress = "正在获取 Apple 地图地址"
+    @Published private(set) var formattedAddress = L("正在获取 Apple 地图地址")
     @Published private(set) var timeZone: TimeZone?
     @Published private(set) var coordinate: CLLocationCoordinate2D?
 
@@ -697,7 +764,7 @@ private final class MapLocationSummary: ObservableObject {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_Hans_CN")
         formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy年 M月 d日 HH:mm"
+        formatter.dateFormat = L("yyyy年 M月 d日 HH:mm")
         return formatter.string(from: date)
     }
 
@@ -771,10 +838,10 @@ private final class MapLocationSummary: ObservableObject {
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                self.country = "未知国家"
-                self.city = "未知城市"
+                self.country = L("未知国家")
+                self.city = L("未知城市")
                 self.postalCode = "—"
-                self.formattedAddress = "无法获取地址"
+                self.formattedAddress = L("无法获取地址")
                 self.timeZone = nil
             }
         }
@@ -782,10 +849,10 @@ private final class MapLocationSummary: ObservableObject {
 
     private func applyChinesePlacemark(_ placemark: CLPlacemark?, countryCode: String) {
         let isTaiwan = countryCode == "TW"
-        country = "中国"
+        country = L("中国")
         city = nonEmpty(
             placemark?.locality ?? placemark?.subAdministrativeArea ?? placemark?.administrativeArea
-        ) ?? "未知城市"
+        ) ?? L("未知城市")
         postalCode = nonEmpty(placemark?.postalCode) ?? "—"
         timeZone = placemark?.timeZone
 
@@ -795,7 +862,7 @@ private final class MapLocationSummary: ObservableObject {
         let pointOfInterest = placemark?.areasOfInterest?
             .compactMap { nonEmpty($0) }
             .first
-        let prefix = isTaiwan ? "中华人民共和国台湾省" : "中国"
+        let prefix = isTaiwan ? L("中华人民共和国台湾省") : L("中国")
         let components = [
             prefix,
             nonEmpty(placemark?.administrativeArea),
@@ -814,7 +881,7 @@ private final class MapLocationSummary: ObservableObject {
             }) else { return }
             result.append(value)
         }
-        formattedAddress = components.isEmpty ? "无法获取地址" : components.joined()
+        formattedAddress = components.isEmpty ? L("无法获取地址") : components.joined()
     }
 
     private func bestPlacemark(in placemarks: [CLPlacemark]) -> CLPlacemark? {
@@ -843,10 +910,10 @@ private final class MapLocationSummary: ObservableObject {
     ) {
         country = countryCode.flatMap {
             Locale(identifier: "zh_Hans_CN").localizedString(forRegionCode: $0)
-        } ?? nonEmpty(chinese?.country) ?? "未知国家"
+        } ?? nonEmpty(chinese?.country) ?? L("未知国家")
         city = nonEmpty(
             chinese?.locality ?? chinese?.subAdministrativeArea ?? chinese?.administrativeArea
-        ) ?? "未知城市"
+        ) ?? L("未知城市")
         postalCode = nonEmpty(english?.postalCode ?? chinese?.postalCode) ?? "—"
         timeZone = english?.timeZone ?? chinese?.timeZone
 
@@ -900,7 +967,7 @@ struct BottomControlsView: View {
                             Button {
                                 session.adjustSpeed(by: -0.25)
                             } label: {
-                                Label("减速", systemImage: "minus.circle.fill")
+                                Label(L("减速"), systemImage: "minus.circle.fill")
                             }
                             .disabled(session.speedMultiplier <= 0.25)
 
@@ -918,7 +985,7 @@ struct BottomControlsView: View {
                             Button {
                                 session.adjustSpeed(by: 0.25)
                             } label: {
-                                Label("加速", systemImage: "plus.circle.fill")
+                                Label(L("加速"), systemImage: "plus.circle.fill")
                             }
                             .disabled(session.speedMultiplier >= 4.0)
                         }
@@ -964,7 +1031,7 @@ struct BottomControlsView: View {
 
             HStack(spacing: 10) {
                 Toggle(isOn: $session.routeLoopEnabled) {
-                    Label("循环", systemImage: "repeat")
+                    Label(L("循环"), systemImage: "repeat")
                         .font(.caption.weight(.semibold))
                 }
                 .toggleStyle(.switch)
@@ -979,9 +1046,9 @@ struct BottomControlsView: View {
         let lap = max(1, session.routeLap)
         let progress = Int(session.routeProgress * 100)
         if session.routeLoopEnabled {
-            return "第 \(lap)/\(session.routeLoopCount) 圈 · \(progress)%"
+            return L("第 %@/%@ 圈 · %@%", "\(lap)", "\(session.routeLoopCount)", "\(progress)")
         }
-        return "第 \(lap) 圈 · \(progress)%"
+        return L("第 %@ 圈 · %@%", "\(lap)", "\(progress)")
     }
 
     private var loopCountControl: some View {
@@ -994,7 +1061,7 @@ struct BottomControlsView: View {
             }
             .disabled(!session.routeLoopEnabled || session.routeLoopCount <= minimumLoopCount)
 
-            Text("共 \(session.routeLoopCount) 圈")
+            Text(L("共 %@ 圈", "\(session.routeLoopCount)"))
                 .font(.caption.locusMonospacedDigit().weight(.semibold))
                 .frame(minWidth: 58)
 
@@ -1012,7 +1079,7 @@ struct BottomControlsView: View {
         .contentShape(Capsule())
         .opacity(session.routeLoopEnabled ? 1 : 0.55)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("循环次数，共 \(session.routeLoopCount) 圈")
+        .accessibilityLabel(L("循环次数，共 %@ 圈", "\(session.routeLoopCount)"))
     }
 
     private var minimumLoopCount: Int {
@@ -1030,7 +1097,7 @@ struct BottomControlsView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("打开轨迹")
+        .accessibilityLabel(L("打开轨迹"))
     }
 
     private var joystickButton: some View {
@@ -1048,7 +1115,7 @@ struct BottomControlsView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(session.joystickActive ? "关闭摇杆" : "开启摇杆")
+        .accessibilityLabel(session.joystickActive ? L("关闭摇杆") : L("开启摇杆"))
     }
 
     private var sessionControl: some View {
@@ -1078,11 +1145,11 @@ struct BottomControlsView: View {
                 Button {
                     session.stop()
                 } label: {
-                    Label("停止定位", systemImage: "stop.fill")
+                    Label(L("停止定位"), systemImage: "stop.fill")
                 }
             }
         }
-        .accessibilityHint(session.canResumeRoute ? "轻点继续轨迹；长按可停止定位" : "")
+        .accessibilityHint(session.canResumeRoute ? L("轻点继续轨迹；长按可停止定位") : "")
     }
 
     private var showsCrosshairSessionControls: Bool {
@@ -1099,7 +1166,7 @@ struct BottomControlsView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     session.stop()
                 } label: {
-                    Text("停止")
+                    Text(L("停止"))
                         .font(.subheadline.weight(.bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -1110,13 +1177,13 @@ struct BottomControlsView: View {
 
                 Button {
                     guard let target = session.crosshairCoordinate else {
-                        session.lastError = "尚未取得准星位置，请先移动地图。"
+                        session.lastError = L("尚未取得准星位置，请先移动地图。")
                         return
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     session.teleport(to: target)
                 } label: {
-                    Text("应用当前位置")
+                    Text(L("应用当前位置"))
                         .font(.subheadline.weight(.bold))
                         .foregroundColor(.black)
                         .lineLimit(1)
@@ -1135,9 +1202,12 @@ struct BottomControlsView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     performSessionAction()
                 } label: {
-                    Text("开始定位")
+                    // Short labels so both buttons fit side by side without
+                    // shrinking to an ellipsis on narrow screens.
+                    Text(L("开始"))
                         .font(.subheadline.weight(.bold))
                         .foregroundColor(startControlForegroundColor)
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .locusGlass(.interactive, tint: startControlColor, in: Capsule())
@@ -1149,9 +1219,10 @@ struct BottomControlsView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     NotificationCenter.default.post(name: .locusBuildRouteToTarget, object: nil)
                 } label: {
-                    Text("生成轨迹")
+                    Text(L("生成"))
                         .font(.subheadline.weight(.bold))
                         .foregroundColor(.white)
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .locusGlass(.interactive, tint: Color.blue, in: Capsule())
@@ -1168,7 +1239,7 @@ struct BottomControlsView: View {
             Button {
                 NotificationCenter.default.post(name: .locusDeleteRoute, object: nil)
             } label: {
-                Text("结束")
+                Text(L("结束"))
                     .font(.subheadline.weight(.bold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -1181,7 +1252,7 @@ struct BottomControlsView: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 session.resumeRoute()
             } label: {
-                Text("继续")
+                Text(L("继续"))
                     .font(.subheadline.weight(.bold))
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity)
@@ -1194,9 +1265,9 @@ struct BottomControlsView: View {
     }
 
     private var sessionControlTitle: String {
-        if session.canResumeRoute { return "继续轨迹" }
-        if session.isSpoofing { return session.isMoving ? "暂停" : "停止定位" }
-        return "开始定位"
+        if session.canResumeRoute { return L("继续轨迹") }
+        if session.isSpoofing { return session.isMoving ? L("暂停") : L("停止定位") }
+        return L("开始")
     }
 
     private var sessionControlColor: Color {
@@ -1223,8 +1294,8 @@ struct BottomControlsView: View {
         } else {
             guard let target = session.selectedTargetCoordinate else {
                 session.lastError = session.targetSelectionMode == .crosshair
-                    ? "尚未取得准星位置，请先移动地图。"
-                    : "请先点击地图放置图钉。"
+                    ? L("尚未取得准星位置，请先移动地图。")
+                    : L("请先点击地图放置图钉。")
                 return
             }
             session.teleport(to: target)

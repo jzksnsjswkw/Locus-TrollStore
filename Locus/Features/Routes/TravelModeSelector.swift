@@ -30,8 +30,8 @@ struct TravelModeSelector: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("交通方式：\(mode.title)")
-                .accessibilityValue(session.travelMode == mode ? "已选择" : "未选择")
+                .accessibilityLabel(L("交通方式：%@", "\(mode.title)"))
+                .accessibilityValue(session.travelMode == mode ? L("已选择") : L("未选择"))
             }
         }
     }

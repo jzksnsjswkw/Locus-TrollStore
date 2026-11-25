@@ -142,10 +142,36 @@ enum RouteBuilder {
 }
 
 enum GPXCodec {
+    /// Remembers the last export per file name. Under roothide the container
+    /// path DocumentManager reports is not the path this sandbox may read, so a
+    /// route exported and then immediately re-imported can be unreadable even
+    /// though we wrote it ourselves. Keeping the bytes makes that round trip
+    /// work regardless of the sandbox's answer.
+    enum RecentExports {
+        private static var cache: [String: Data] = [:]
+
+        static func store(_ data: Data, filename: String) {
+            cache[filename] = data
+            if cache.count > 8 {
+                cache.removeValue(forKey: cache.keys.first ?? "")
+            }
+        }
+
+        static func data(for filename: String) -> Data? {
+            cache[filename]
+        }
+    }
+    /// Parses a GPX file. Also accepts raw XML data so a document handed over
+    /// by Files (which grants a security-scoped URL, not always a readable
+    /// path) can be decoded directly from its bytes.
     static func parse(_ url: URL) throws -> [CLLocationCoordinate2D] {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         let data = try Data(contentsOf: url)
+        return try parse(data: data)
+    }
+
+    static func parse(data: Data) throws -> [CLLocationCoordinate2D] {
         let text = String(decoding: data, as: UTF8.self)
         var coords: [CLLocationCoordinate2D] = []
         let pattern = #"lat="([^"]+)"[^>]*lon="([^"]+)""#
@@ -173,7 +199,7 @@ enum GPXCodec {
             }
         }
         guard !coords.isEmpty else {
-            throw NSError(domain: "Locus", code: 2, userInfo: [NSLocalizedDescriptionKey: "GPX 中未找到轨迹点"])
+            throw NSError(domain: "Locus", code: 2, userInfo: [NSLocalizedDescriptionKey: L("GPX 中未找到轨迹点")])
         }
         return coords
     }

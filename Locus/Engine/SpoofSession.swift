@@ -11,10 +11,10 @@ enum TravelMode: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .walk: return "步行"
-        case .run: return "跑步"
-        case .cycle: return "骑行"
-        case .drive: return "驾车"
+        case .walk: return L("步行")
+        case .run: return L("跑步")
+        case .cycle: return L("骑行")
+        case .drive: return L("驾车")
         }
     }
 
@@ -54,11 +54,11 @@ enum SpoofStatus: Equatable {
 
     var label: String {
         switch self {
-        case .idle: return "未模拟定位"
-        case .connecting: return "正在启动…"
-        case .active: return "正在模拟定位"
-        case .reconnecting: return "正在重新连接…"
-        case .dropped: return "连接中断"
+        case .idle: return L("未模拟定位")
+        case .connecting: return L("正在启动…")
+        case .active: return L("正在模拟定位")
+        case .reconnecting: return L("正在重新连接…")
+        case .dropped: return L("连接中断")
         }
     }
 
@@ -256,7 +256,18 @@ final class SpoofSession: ObservableObject {
         SearchHistoryEntry.save(searchHistory, key: searchHistoryKey)
     }
 
-    func makeBackup() -> LocusBackup {
+    /// Every stored elevation API key, keyed by provider raw value.
+    private static func elevationAPIKeysSnapshot() -> [String: String] {
+        var keys: [String: String] = [:]
+        for source in ElevationDataSource.allCases {
+            if let key = UserDefaults.standard.elevationAPIKey(for: source), !key.isEmpty {
+                keys[source.rawValue] = key
+            }
+        }
+        return keys
+    }
+
+    func makeBackup(includingRoutes: Bool = true) -> LocusBackup {
         LocusBackup(
             favorites: favorites,
             searchHistory: searchHistory,
@@ -272,15 +283,19 @@ final class SpoofSession: ObservableObject {
                 restoreLastMapView: restoreLastMapView,
                 appearanceMode: appearanceMode.rawValue,
                 zoomSliderEnabled: zoomSliderEnabled,
+                altitudeEnabled: altitudeEnabled,
+                elevationDataSource: UserDefaults.standard.elevationDataSource.rawValue,
+                elevationAPIKeys: Self.elevationAPIKeysSnapshot(),
                 locationJitterEnabled: locationJitterEnabled,
                 locationJitterRadius: locationJitterRadius,
                 locationUpdateInterval: locationUpdateInterval,
                 locationUpdateJitter: locationUpdateJitter
-            )
+            ),
+            savedRoutes: includingRoutes ? SavedRoute.load() : nil
         )
     }
 
-    func applyBackup(_ uncheckedBackup: LocusBackup) throws {
+    func applyBackup(_ uncheckedBackup: LocusBackup, includingRoutes: Bool = true) throws {
         let backup = try uncheckedBackup.validated()
         for place in backup.favorites where favorite(at: place.coordinate) == nil {
             favorites.append(place)
@@ -311,6 +326,22 @@ final class SpoofSession: ObservableObject {
         if let storedZoomSliderEnabled = backup.preferences.zoomSliderEnabled {
             zoomSliderEnabled = storedZoomSliderEnabled
         }
+        if let storedAltitudeEnabled = backup.preferences.altitudeEnabled {
+            altitudeEnabled = storedAltitudeEnabled
+        }
+        // Elevation provider and every stored API key, so switching providers
+        // after a restore does not demand the key again.
+        if let storedSource = backup.preferences.elevationDataSource,
+           let source = ElevationDataSource(rawValue: storedSource) {
+            UserDefaults.standard.elevationDataSource = source
+        }
+        if let storedKeys = backup.preferences.elevationAPIKeys {
+            for (rawSource, key) in storedKeys {
+                guard let source = ElevationDataSource(rawValue: rawSource) else { continue }
+                let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                UserDefaults.standard.setElevationAPIKey(trimmed.isEmpty ? nil : trimmed, for: source)
+            }
+        }
         if let storedJitterEnabled = backup.preferences.locationJitterEnabled {
             locationJitterEnabled = storedJitterEnabled
         }
@@ -324,6 +355,18 @@ final class SpoofSession: ObservableObject {
             locationUpdateJitter = min(5, max(0, storedUpdateJitter))
         }
         locationUpdateJitter = min(locationUpdateJitter, locationUpdateInterval)
+
+        if includingRoutes, let incomingRoutes = backup.savedRoutes, !incomingRoutes.isEmpty {
+            // Merge by name+timestamp: re-importing the same backup must not
+            // duplicate every route.
+            var existing = SavedRoute.load()
+            for route in incomingRoutes where !existing.contains(where: {
+                $0.name == route.name && $0.createdAt == route.createdAt
+            }) {
+                existing.append(route)
+            }
+            SavedRoute.save(Array(existing.prefix(SavedRoute.maxStoredRoutes)))
+        }
     }
 
     func saveMapRegion(_ region: MKCoordinateRegion) {
@@ -440,7 +483,7 @@ final class SpoofSession: ObservableObject {
         routeElapsedTime = 0
         let start = simulated ?? pin ?? realMapCoordinate
         guard let start else {
-            lastError = "使用摇杆前请先放置图钉或开始模拟定位。"
+            lastError = L("使用摇杆前请先放置图钉或开始模拟定位。")
             return
         }
         if simulated == nil,
@@ -622,7 +665,7 @@ final class SpoofSession: ObservableObject {
 
     func favoriteDisplayName(_ place: SavedPlace) -> String {
         if place.nameIsUserEdited == true { return place.name }
-        return Self.isGenericFavoriteName(place.name) ? "收藏地点" : place.name
+        return Self.isGenericFavoriteName(place.name) ? L("收藏地点") : place.name
     }
 
     @discardableResult
@@ -633,13 +676,13 @@ final class SpoofSession: ObservableObject {
             return (false, displayName)
         }
         addFavorite(name: name, coordinate: coordinate)
-        return (true, favorite(at: coordinate).map(favoriteDisplayName) ?? "收藏地点")
+        return (true, favorite(at: coordinate).map(favoriteDisplayName) ?? L("收藏地点"))
     }
 
     func addFavorite(name: String, coordinate: CLLocationCoordinate2D) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let place = SavedPlace(
-            name: Self.isGenericFavoriteName(trimmed) ? "收藏地点" : trimmed,
+            name: Self.isGenericFavoriteName(trimmed) ? L("收藏地点") : trimmed,
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             nameIsUserEdited: false
@@ -737,7 +780,7 @@ final class SpoofSession: ObservableObject {
                 let resolvedName = [placemark.name, placemark.subLocality, placemark.locality]
                     .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .first { !$0.isEmpty }
-                favorites[index].name = resolvedName ?? "收藏地点"
+                favorites[index].name = resolvedName ?? L("收藏地点")
             }
             SavedPlace.save(favorites, key: favoritesKey)
             return true
@@ -778,7 +821,7 @@ final class SpoofSession: ObservableObject {
         }), !Self.isGenericFavoriteName(recent.name) {
             return recent.name
         }
-        return "收藏地点"
+        return L("收藏地点")
     }
 
     private static func coordinateLabel(_ coordinate: CLLocationCoordinate2D) -> String {
@@ -787,7 +830,7 @@ final class SpoofSession: ObservableObject {
 
     private static func isGenericFavoriteName(_ name: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "Favorite" || trimmed == "收藏地点" { return true }
+        if trimmed.isEmpty || trimmed == "Favorite" || trimmed == L("收藏地点") { return true }
         // Coordinate-looking labels from older teleports.
         let parts = trimmed.split(separator: ",")
         if parts.count == 2,
@@ -806,7 +849,7 @@ final class SpoofSession: ObservableObject {
     ) -> Bool {
         guard CLLocationCoordinate2DIsValid(coordinate),
               coordinate.latitude.isFinite, coordinate.longitude.isFinite else {
-            lastError = "所选地图坐标无效，请重新放置图钉。"
+            lastError = L("所选地图坐标无效，请重新放置图钉。")
             return false
         }
         guard !isBusy else {
@@ -916,7 +959,7 @@ final class SpoofSession: ObservableObject {
     private func postDropNotification(_ message: String) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         let content = UNMutableNotificationContent()
-        content.title = "Locus 模拟定位已断开"
+        content.title = L("Locus 模拟定位已断开")
         content.body = message
         content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

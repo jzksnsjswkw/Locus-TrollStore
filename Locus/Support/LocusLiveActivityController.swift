@@ -15,7 +15,7 @@ actor LocusLiveActivityController {
     private var lastPublishedStatus: String?
     private var registrationBlocked = false
     private var regionLookupTask: Task<Void, Never>?
-    private var city = "正在获取位置"
+    private var city = L("正在获取位置")
     private var country = ""
 
     func sync(
@@ -28,16 +28,16 @@ actor LocusLiveActivityController {
     ) async {
         guard isActive, let coordinate else {
             await end()
-            recordStatus("等待模拟定位")
+            recordStatus(L("等待模拟定位"))
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             await end()
-            recordStatus("系统未允许实时活动")
+            recordStatus(L("系统未允许实时活动"))
             return
         }
         guard !registrationBlocked else {
-            recordStatus("LiveContainer 未向系统注册实时活动扩展")
+            recordStatus(L("LiveContainer 未向系统注册实时活动扩展"))
             return
         }
         if !allowRegionLookup {
@@ -81,7 +81,7 @@ actor LocusLiveActivityController {
             await currentActivity.update(content)
             lastPublishedAt = now
             lastPublishedStatus = status
-            recordStatus("运行中")
+            recordStatus(L("运行中"))
             return
         }
 
@@ -93,14 +93,14 @@ actor LocusLiveActivityController {
             )
             lastPublishedAt = now
             lastPublishedStatus = status
-            recordStatus("运行中")
+            recordStatus(L("运行中"))
         } catch {
             let message = error.localizedDescription
             if message.localizedCaseInsensitiveContains("NSSupportsLiveActivities") {
                 registrationBlocked = true
-                recordStatus("LiveContainer 未向系统注册实时活动扩展")
+                recordStatus(L("LiveContainer 未向系统注册实时活动扩展"))
             } else {
-                recordStatus("启动失败：\(message)")
+                recordStatus(L("启动失败：%@", "\(message)"))
             }
             NSLog("[Locus] Live Activity start failed: %@", message)
         }
@@ -109,7 +109,7 @@ actor LocusLiveActivityController {
     private func shouldReverseGeocode(_ location: CLLocation) -> Bool {
         guard let geocodedLocation else { return true }
         if location.distance(from: geocodedLocation) >= 5_000 { return true }
-        guard city == "未知城市",
+        guard city == L("未知城市"),
               let lastGeocodeAttempt else { return false }
         return Date().timeIntervalSince(lastGeocodeAttempt) >= 300
     }
@@ -120,18 +120,18 @@ actor LocusLiveActivityController {
         do {
             let placemark = try await geocoder.reverseGeocodeLocation(location).first
             guard !Task.isCancelled else { return }
-            city = placemark?.locality ?? placemark?.administrativeArea ?? "未知城市"
-            country = placemark?.country ?? "未知国家"
+            city = placemark?.locality ?? placemark?.administrativeArea ?? L("未知城市")
+            country = placemark?.country ?? L("未知国家")
         } catch {
             guard !Task.isCancelled else { return }
-            city = "未知城市"
-            country = "未知国家"
+            city = L("未知城市")
+            country = L("未知国家")
         }
     }
 
     private static func formatDistance(_ meters: CLLocationDistance) -> String {
         if meters < 1_000 {
-            return "\(Int(max(0, meters).rounded())) 米"
+            return L("%@ 米", "\(Int(max(0, meters).rounded()))")
         }
         return String(format: "%.2f km", meters / 1_000)
     }

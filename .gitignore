@@ -8,7 +8,10 @@ Vendor/idevice-build/
 outputs/
 *.ipa
 *.tipa
-Payload/
+Payload
+Probe
+RelocateReborn
+GeoShimTweak
 
 # Development agent workspace
 .sisyphus/

@@ -11,9 +11,9 @@ enum AppAppearanceMode: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: return "跟随系统"
-        case .light: return "浅色"
-        case .dark: return "深色"
+        case .system: return L("跟随系统")
+        case .light: return L("浅色")
+        case .dark: return L("深色")
         }
     }
 
@@ -34,8 +34,8 @@ enum TargetSelectionMode: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .pin: return "红色图钉"
-        case .crosshair: return "屏幕准星"
+        case .pin: return L("红色图钉")
+        case .crosshair: return L("屏幕准星")
         }
     }
 }

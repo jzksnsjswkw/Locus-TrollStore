@@ -1,6 +1,4 @@
 import Foundation
-import SwiftUI
-import UniformTypeIdentifiers
 
 struct LocusBackup: Codable {
     static let currentSchemaVersion = 1
@@ -10,12 +8,25 @@ struct LocusBackup: Codable {
     var favorites: [SavedPlace]
     var searchHistory: [SearchHistoryEntry]
     var preferences: BackupPreferences
+    /// Saved routes. Optional so backups written before routes were included
+    /// still decode (and simply restore nothing).
+    var savedRoutes: [SavedRoute]? = nil
 
     func validated() throws -> LocusBackup {
         guard schemaVersion == Self.currentSchemaVersion else {
             throw BackupError.unsupportedVersion(schemaVersion)
         }
         guard favorites.count <= 10_000, searchHistory.count <= 1_000 else {
+            throw BackupError.invalidContent
+        }
+        guard (savedRoutes?.count ?? 0) <= 200 else {
+            throw BackupError.invalidContent
+        }
+        guard (savedRoutes ?? []).allSatisfy({ route in
+            route.latitudes.count == route.longitudes.count
+                && route.latitudes.count <= SavedRoute.maxStoredPoints
+                && zip(route.latitudes, route.longitudes).allSatisfy { Self.valid(latitude: $0.0, longitude: $0.1) }
+        }) else {
             throw BackupError.invalidContent
         }
         guard favorites.allSatisfy({ Self.valid(latitude: $0.latitude, longitude: $0.longitude) }),
@@ -43,6 +54,13 @@ struct BackupPreferences: Codable {
     var restoreLastMapView: Bool
     var appearanceMode: String?
     var zoomSliderEnabled: Bool?
+    /// Optional so backups written before this field existed still decode.
+    var altitudeEnabled: Bool?
+    /// Selected elevation provider, plus the API keys of *every* provider (only
+    /// some need one), so a restore on another device does not require
+    /// re-entering keys for providers the user switches between.
+    var elevationDataSource: String?
+    var elevationAPIKeys: [String: String]?
     var locationJitterEnabled: Bool?
     var locationJitterRadius: Double?
     var locationUpdateInterval: Double?
@@ -56,35 +74,9 @@ enum BackupError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedVersion(let version):
-            return "不支持版本为 \(version) 的 Locus 备份。"
+            return L("不支持版本为 %@ 的 Locus 备份。", "\(version)")
         case .invalidContent:
-            return "备份包含无效或超出范围的数据。"
+            return L("备份包含无效或超出范围的数据。")
         }
-    }
-}
-
-struct LocusBackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-
-    var backup: LocusBackup
-
-    init(backup: LocusBackup) {
-        self.backup = backup
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        guard let data = configuration.file.regularFileContents else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        backup = try decoder.decode(LocusBackup.self, from: data).validated()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return FileWrapper(regularFileWithContents: try encoder.encode(backup))
     }
 }

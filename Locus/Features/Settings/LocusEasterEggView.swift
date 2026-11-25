@@ -67,7 +67,7 @@ struct LocusEasterEggView: View {
                     }
                     Spacer()
 
-                    Text("差不多吧")
+                    Text(L("差不多吧"))
                         .font(.caption.italic())
                         .foregroundColor(.white.opacity(0.35))
                         .padding(.bottom, 28)

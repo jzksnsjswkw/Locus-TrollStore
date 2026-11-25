@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MapHomeView: View {
     @EnvironmentObject private var session: SpoofSession
+    @EnvironmentObject private var languageStore: LocusLanguageStore
     @Environment(\.scenePhase) private var scenePhase
     @Binding var showPlaces: Bool
     @Binding var favoriteRenameSuggestion: SavedPlace?
@@ -13,6 +14,8 @@ struct MapHomeView: View {
     @Binding var selectedRouteOptionID: UUID?
     @Binding var drawingRouteActive: Bool
     @Binding var drawingRoutePointCount: Int
+    /// Mirrored to RootView so the route bar can offer "编辑".
+    @Binding var routeIsHandDrawnPublished: Bool
 
     @StateObject private var search = PlaceSearchCompleter()
     @StateObject private var mapDataSourceDetector = MapDataSourceDetector()
@@ -32,14 +35,19 @@ struct MapHomeView: View {
     @State private var routeStart: CLLocationCoordinate2D?
     @State private var routeEnd: CLLocationCoordinate2D?
     @State private var routeWaypoints: [CLLocationCoordinate2D] = []
+    /// Waypoint whose delete pill is showing.
+    @State private var selectedWaypointIndex: Int?
     @State private var routeCoords: [CLLocationCoordinate2D] = []
     @State private var routeIsHandDrawn = false
+    /// Original vertices of a saved hand-drawn route, so re-editing does not
+    /// fall back to the 10 m resampled line.
+    @State private var editingVertices: [CLLocationCoordinate2D]?
     @State private var edgeZoomStartRegion: MKCoordinateRegion?
     @State private var edgeZoomActive = false
     @State private var edgeZoomFeedbackStep = 0
     @State private var lastLocationButtonTap: Date?
     @State private var isRouting = false
-    @State private var showGPXImporter = false
+    @State private var showSavedRoutes = false
     @State private var drawnPath: [CLLocationCoordinate2D] = []
     @State private var drawMode = false
     @State private var drawnRouteStart: CLLocationCoordinate2D?
@@ -55,11 +63,19 @@ struct MapHomeView: View {
     @State private var confirmClearSearchHistory = false
     /// Set when the pin comes from search / a named place so starring keeps the title.
     @State private var pinPlaceName: String?
-    /// Bumped once the map region settles so the marker overlays re-evaluate their
-    /// converted points against the final viewport (search-placed pins land
-    /// off-screen otherwise, because the body re-renders before updateUIView
-    /// applies the new region).
-    @State private var regionSettledToken = 0
+    /// Owns the marker views' screen positions; the map delegate repositions them
+    /// synchronously each frame so they never trail a pan.
+    /// Bumped by `mapViewDidChangeVisibleRegion` so the SwiftUI-positioned
+    /// markers re-project while the map moves.
+    @State private var regionChangingToken = 0
+    /// Coalesces per-frame token bumps to one per runloop turn.
+    @State private var regionChangePending = false
+    /// True while the user is panning/pinching/zooming the map. Auto-follow must
+    /// not move the camera during that: applying a region mid-gesture cancels
+    /// the pinch and the zoom is lost.
+    @State private var userIsManipulatingMap = false
+    /// Pending follow target captured while the gesture was in progress.
+    @State private var deferredFollowCoordinate: CLLocationCoordinate2D?
     /// Safe-area insets captured outside the full-bleed map surface; the
     /// full-screen ZStack ignores the safe area, so UI chrome re-applies
     /// these explicitly.
@@ -209,7 +225,15 @@ struct MapHomeView: View {
                 },
                 onMapTap: handleMapTap,
                 onMapLongPress: handleMapLongPress,
-                onRegionSettled: handleRegionSettled
+                onRegionSettled: handleRegionSettled,
+                onRegionChanging: handleRegionChanging,
+                onUserInteractionBegan: { userIsManipulatingMap = true },
+                onUserInteractionEnded: {
+                    userIsManipulatingMap = false
+                    // Re-centre now that the camera is the user's again; the
+                    // span comes from the map view, so the new zoom is kept.
+                    applyDeferredFollowIfNeeded()
+                }
             )
             // Fill the container explicitly: a UIViewRepresentable has no
             // intrinsic size, and in a ZStack it can collapse to zero frame
@@ -232,7 +256,21 @@ struct MapHomeView: View {
             generatedRouteReady = routeReadyState
             drawingRouteActive = drawMode
             drawingRoutePointCount = drawnPath.count
-            if session.restoreLastMapView, let saved = session.savedMapRegion() {
+            // A language switch rebuilds this view and loses the camera; restore
+            // the exact position and zoom recorded before the switch, before the
+            // "restore last map view" branch can pick a stale persisted value.
+            let restoredAfterLanguageSwitch = languageStore.needsCameraRestore
+            if restoredAfterLanguageSwitch, let live = languageStore.liveMapRegion {
+                languageStore.needsCameraRestore = false
+                region = live
+                if session.targetSelectionMode == .crosshair {
+                    session.crosshairCoordinate = live.center
+                }
+            }
+            if restoredAfterLanguageSwitch {
+                // Skip the persisted restore: it is older than the live camera
+                // and would overwrite it.
+            } else if session.restoreLastMapView, let saved = session.savedMapRegion() {
                 region = saved
                 if session.targetSelectionMode == .crosshair {
                     session.crosshairCoordinate = saved.center
@@ -241,12 +279,19 @@ struct MapHomeView: View {
                       session.crosshairCoordinate == nil {
                 session.crosshairCoordinate = session.pin ?? session.simulated ?? session.realMapCoordinate
             }
+
         }
         .onChange(of: routeReadyState) { ready in
             generatedRouteReady = ready
         }
         .onChange(of: drawMode) { active in
             drawingRouteActive = active
+        }
+        .onChange(of: routeIsHandDrawn) { handDrawn in
+            routeIsHandDrawnPublished = handDrawn
+        }
+        .onAppear {
+            routeIsHandDrawnPublished = routeIsHandDrawn
         }
         .onChange(of: drawnPath.count) { count in
             drawingRoutePointCount = count
@@ -293,8 +338,15 @@ struct MapHomeView: View {
     private var mapRouteInteractions: some View {
         mapInteractions
         .onReceive(NotificationCenter.default.publisher(for: .locusImportGPX)) { note in
-            guard let url = note.object as? URL else { return }
-            importGPX(url)
+            guard let data = note.object as? Data else { return }
+            importGPX(data: data)
+        }
+        .onAppear {
+            // A GPX opened while the app was still booting arrives before this
+            // view subscribes; drain it here.
+            if let pending = LocusIncomingURL.takePendingGPX() {
+                importGPX(data: pending)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .locusDeleteRoute)) { _ in
             deleteGeneratedRoute()
@@ -351,16 +403,23 @@ struct MapHomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .locusSaveDrawingRoute)) { _ in
             saveDrawingRoute()
         }
-        .fileImporter(isPresented: $showGPXImporter, allowedContentTypes: [.xml, .data], allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                importGPX(url)
+        .onReceive(NotificationCenter.default.publisher(for: .locusEditDrawingRoute)) { _ in
+            editHandDrawnRoute()
+        }
+        .sheet(isPresented: $showSavedRoutes) {
+            LocusSavedRoutesSheet { route in
+                showSavedRoutes = false
+                loadSavedRoute(route)
             }
+            .locusMediumLargeDetents()
         }
         .sheet(isPresented: $showRouteSheet) {
             RoutePlannerSheet(
                 onPlay: playRoute,
-                onImportGPX: { showGPXImporter = true },
-                onExportGPX: exportGPX,
+                onImportGPX: importGPXFromPicker,
+                onExportGPX: exportGPXFromSheet,
+                onSaveRoute: saveRouteFromSheet,
+                onShowSavedRoutes: showSavedRoutesFromSheet,
                 onBuildRouteToTarget: {
                     showRouteSheet = false
                     buildRouteToCurrentTarget()
@@ -373,14 +432,15 @@ struct MapHomeView: View {
                 }
             )
             .environmentObject(session)
+            .environmentObject(languageStore)
             .locusMediumLargeDetents()
         }
         .locusConfirmAlert(
-            "清空搜索历史",
+            L("清空搜索历史"),
             isPresented: $confirmClearSearchHistory,
-            confirmTitle: "清空",
+            confirmTitle: L("清空"),
             onConfirm: { session.clearSearchHistory() },
-            message: "此操作无法撤销。"
+            message: L("此操作无法撤销。")
         )
     }
 
@@ -389,8 +449,7 @@ struct MapHomeView: View {
     @ViewBuilder
     private var simulatedMarkerOverlay: some View {
         if let mapView, let sim = session.simulated {
-            // Re-evaluate when the region settles so markers track the final viewport.
-            let _ = regionSettledToken
+            let _ = regionChangingToken
             let point = mapView.convert(sim, toPointTo: mapView)
             ZStack {
                 Circle().fill(LocusTheme.accent.opacity(0.25)).frame(width: 44, height: 44)
@@ -406,7 +465,7 @@ struct MapHomeView: View {
     @ViewBuilder
     private var favoriteMarkersOverlay: some View {
         if let mapView {
-            let _ = regionSettledToken
+            let _ = regionChangingToken
             ForEach(session.favorites) { favorite in
                 let point = mapView.convert(favorite.coordinate, toPointTo: mapView)
                 FavoriteMapMarker(
@@ -414,6 +473,7 @@ struct MapHomeView: View {
                     onSelect: {
                         dismissStatusDetails()
                         selectedFavoriteID = favorite.id
+                        selectedWaypointIndex = nil
                         pinSelected = false
                         pinExpandedActions = false
                         if session.targetSelectionMode != .crosshair {
@@ -436,13 +496,8 @@ struct MapHomeView: View {
                 )
                 .accessibilityLabel(session.favoriteDisplayName(favorite))
                 .accessibilityHint(session.targetSelectionMode == .crosshair
-                                   ? "轻点显示删除按钮"
-                                   : "半秒内松手可切换模拟位置，按住半秒显示删除按钮")
-                // Mirrors the old Annotation anchor: UnitPoint(x: 0.5, y: 0.76).
-                // The 160x92 frame is bottom-aligned; the anchor point sits
-                // 0.76 * 92 = 69.92 from the top, i.e. 22.08 above the bottom edge.
-                // Positioning the frame center at point.y - 24 puts that point
-                // on the coordinate.
+                                   ? L("轻点显示删除按钮")
+                                   : L("半秒内松手可切换模拟位置，按住半秒显示删除按钮"))
                 .frame(width: 160, height: 92, alignment: .bottom)
                 .position(x: point.x, y: point.y - 24)
             }
@@ -455,7 +510,7 @@ struct MapHomeView: View {
            session.targetSelectionMode == .pin,
            let pin = session.pin,
            session.favorite(at: pin) == nil {
-            let _ = regionSettledToken
+            let _ = regionChangingToken
             let point = mapView.convert(pin, toPointTo: mapView)
             MapDropPin(
                 selected: pinSelected,
@@ -466,6 +521,7 @@ struct MapHomeView: View {
                     searchFocused = false
                     suppressNextMapTap = true
                     selectedFavoriteID = nil
+                    selectedWaypointIndex = nil
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
                         pinSelected = false
                         pinExpandedActions = false
@@ -521,9 +577,6 @@ struct MapHomeView: View {
                     }
                 }
             )
-            // Anchor the pin tip on the coordinate: the 200x102 frame is
-            // bottom-aligned and positioned so its bottom-center sits on the
-            // converted point (mirrors the old Annotation anchor: .bottom).
             .frame(width: 200, height: 102, alignment: .bottom)
             .position(x: point.x, y: point.y - 51)
         }
@@ -532,13 +585,29 @@ struct MapHomeView: View {
     @ViewBuilder
     private var waypointMarkersOverlay: some View {
         if let mapView {
-            let _ = regionSettledToken
+            let _ = regionChangingToken
             ForEach(routeWaypoints.indices, id: \.self) { index in
                 let point = mapView.convert(routeWaypoints[index], toPointTo: mapView)
-                RouteWaypointMarker(number: index + 1)
-                    .frame(width: 38, height: 44, alignment: .bottom)
-                    .position(x: point.x, y: point.y - 22)
-                    .allowsHitTesting(false)
+                RouteWaypointMarker(
+                    number: index + 1,
+                    selected: selectedWaypointIndex == index,
+                    onTap: {
+                        dismissStatusDetails()
+                        pinSelected = false
+                        pinExpandedActions = false
+                        selectedFavoriteID = nil
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                            selectedWaypointIndex = (selectedWaypointIndex == index) ? nil : index
+                        }
+                    },
+                    onRemove: {
+                        removeWaypoint(at: index)
+                    }
+                )
+                .frame(width: 140, height: 92, alignment: .bottom)
+                .position(x: point.x, y: point.y - 24)
+                .zIndex(selectedWaypointIndex == index ? 1 : 0)
             }
         }
     }
@@ -546,7 +615,7 @@ struct MapHomeView: View {
     @ViewBuilder
     private var routeEndpointMarkersOverlay: some View {
         if let mapView {
-            let _ = regionSettledToken
+            let _ = regionChangingToken
             if let start = drawMode ? drawnPath.first : drawnRouteStart {
                 let point = mapView.convert(start, toPointTo: mapView)
                 RouteEndpointMarker(color: .green, systemImage: "play.fill")
@@ -574,6 +643,7 @@ struct MapHomeView: View {
         pinSelected = false
         pinExpandedActions = false
         selectedFavoriteID = nil
+        selectedWaypointIndex = nil
         placePin(at: coordinate)
     }
 
@@ -584,7 +654,7 @@ struct MapHomeView: View {
             suppressNextMapTap = true
             routeWaypoints.append(coordinate)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showFavoriteToast("已添加途经点 \(routeWaypoints.count)，正在重新规划")
+            showFavoriteToast(L("已添加途经点 %@，正在重新规划", "\(routeWaypoints.count)"))
             buildRoadRoute()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 suppressNextMapTap = false
@@ -594,8 +664,67 @@ struct MapHomeView: View {
         }
     }
 
+    /// Drops a waypoint and re-plans the route through the remaining ones.
+    ///
+    /// Waypoints are ordered, so indices shift after a removal; the selection is
+    /// cleared rather than remapped to avoid deleting the wrong marker next.
+    private func removeWaypoint(at index: Int) {
+        guard routeWaypoints.indices.contains(index) else { return }
+        routeWaypoints.remove(at: index)
+        selectedWaypointIndex = nil
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if routeWaypoints.isEmpty {
+            showFavoriteToast(L("已删除途经点"))
+        } else {
+            showFavoriteToast(L("已删除途经点，剩余 %@ 个，正在重新规划", "\(routeWaypoints.count)"))
+        }
+        rebuildRouteAfterWaypointChange()
+    }
+
+    /// Re-plans through the remaining waypoints. When none are left the plain
+    /// start→end route is rebuilt instead of leaving the old detour on screen.
+    private func rebuildRouteAfterWaypointChange() {
+        guard routeStart != nil, routeEnd != nil, !routeIsHandDrawn else { return }
+        buildRoadRoute()
+    }
+
+    /// MapKit reports visible-region changes continuously during a pan/zoom.
+    /// Coalesced to one state write per runloop turn: writing on every callback
+    /// queues more body evaluations than the display can consume.
+    private func handleRegionChanging(_ visibleRegion: MKCoordinateRegion) {
+        // Record the live camera. This fires for programmatic `setRegion` too, so
+        // the value is valid from the moment the map first positions itself —
+        // not only after the user pans, which is what made a language switch
+        // right after launch fall back to the default region.
+        languageStore.liveMapRegion = visibleRegion
+        guard !regionChangePending else { return }
+        regionChangePending = true
+        DispatchQueue.main.async {
+            regionChangePending = false
+            regionChangingToken &+= 1
+        }
+    }
+
+    /// Re-centres on the last position seen while the user was manipulating the
+    /// map. Called once the gesture has ended, so the zoom level survives.
+    private func applyDeferredFollowIfNeeded() {
+        guard let pending = deferredFollowCoordinate else { return }
+        deferredFollowCoordinate = nil
+        guard session.autoFollowRoute, session.routeActive else { return }
+        let span = mapView?.region.span ?? region.span
+        region = MKCoordinateRegion(center: pending, span: span)
+    }
+
     private func handleRegionSettled() {
-        regionSettledToken += 1
+        if let pending = deferredFollowCoordinate {
+            deferredFollowCoordinate = nil
+            // Apply the position that arrived during the gesture, keeping the
+            // span the user just zoomed to.
+            if session.autoFollowRoute, session.routeActive {
+                let span = mapView?.region.span ?? region.span
+                region = MKCoordinateRegion(center: pending, span: span)
+            }
+        }
         session.saveMapRegion(region)
         let suppressed = Date() <= session.crosshairSettleSuppressedUntil
         if session.targetSelectionMode == .crosshair,
@@ -677,6 +806,15 @@ struct MapHomeView: View {
             if hitArea.contains(point) { return true }
         }
 
+        // Waypoints are tappable now; a long press on one must not append a new
+        // waypoint on top of it.
+        for waypoint in routeWaypoints {
+            let markerPoint = mapView.convert(waypoint, toPointTo: mapView)
+            if hypot(markerPoint.x - point.x, markerPoint.y - point.y) <= 30 {
+                return true
+            }
+        }
+
         return false
     }
 
@@ -706,7 +844,7 @@ struct MapHomeView: View {
             Image(systemName: "magnifyingglass")
                 .font(.body.weight(.semibold))
                 .foregroundColor(.secondary)
-            TextField("搜索地点、地址或坐标", text: $searchText)
+            TextField(L("搜索地点、地址或坐标"), text: $searchText)
                 .locusAutocapitalizationWords()
                 .locusFocused($searchFocused)
                 .locusSubmitLabelSearch()
@@ -728,7 +866,7 @@ struct MapHomeView: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("清除搜索内容")
+                .accessibilityLabel(L("清除搜索内容"))
             }
             if searchPresented {
                 Button {
@@ -740,7 +878,7 @@ struct MapHomeView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
-                .accessibilityLabel("收起搜索")
+                .accessibilityLabel(L("收起搜索"))
             }
         }
         .padding(.horizontal, 14)
@@ -795,14 +933,14 @@ struct MapHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Label("搜索历史", systemImage: "clock.arrow.circlepath")
+                    Label(L("搜索历史"), systemImage: "clock.arrow.circlepath")
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                     Spacer()
                     Button {
                         confirmClearSearchHistory = true
                     } label: {
-                        Label("清空", systemImage: "trash")
+                        Label(L("清空"), systemImage: "trash")
                             .font(.caption.weight(.semibold))
                             .foregroundColor(LocusTheme.danger)
                     }
@@ -847,7 +985,7 @@ struct MapHomeView: View {
                                 .frame(width: 36, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("删除搜索历史：\(entry.title)")
+                        .accessibilityLabel(L("删除搜索历史：%@", "\(entry.title)"))
                     }
                     .padding(.leading, 14)
                     .padding(.trailing, 6)
@@ -909,8 +1047,8 @@ struct MapHomeView: View {
         .locusGlass(.clear, in: Capsule())
         .contentShape(Rectangle())
         .gesture(zoomGesture)
-        .accessibilityLabel("地图缩放手势区")
-        .accessibilityHint("直接向上滑放大，向下滑缩小")
+        .accessibilityLabel(L("地图缩放手势区"))
+        .accessibilityHint(L("直接向上滑放大，向下滑缩小"))
     }
 
     private var zoomGesture: some Gesture {
@@ -954,7 +1092,7 @@ struct MapHomeView: View {
             .buttonStyle(.plain)
             .foregroundColor(currentPinIsFavorite ? Color.yellow : Color.primary)
             .disabled(session.selectedTargetCoordinate == nil)
-            .accessibilityLabel(currentPinIsFavorite ? "取消收藏" : "添加收藏")
+            .accessibilityLabel(currentPinIsFavorite ? L("取消收藏") : L("添加收藏"))
 
             Divider()
                 .overlay(Color.white.opacity(0.22))
@@ -965,7 +1103,7 @@ struct MapHomeView: View {
                 searchFocused = false
                 showPlaces = true
             }
-            .accessibilityLabel("打开收藏夹")
+            .accessibilityLabel(L("打开收藏夹"))
 
             Divider()
                 .overlay(Color.white.opacity(0.22))
@@ -975,7 +1113,7 @@ struct MapHomeView: View {
                 dismissStatusDetails()
                 session.mapStyleIndex = (session.mapStyleIndex + 1) % 2
             }
-            .accessibilityLabel("切换地图图层")
+            .accessibilityLabel(L("切换地图图层"))
 
             Divider()
                 .overlay(Color.white.opacity(0.22))
@@ -987,7 +1125,7 @@ struct MapHomeView: View {
                 searchFocused = false
                 handleLocationButtonTap()
             }
-            .accessibilityLabel("回到当前位置；再次轻点回正北")
+            .accessibilityLabel(L("回到当前位置；再次轻点回正北"))
         }
         .padding(4)
         .frame(width: MapChromeLayout.rightColumnWidth)
@@ -1168,7 +1306,7 @@ struct MapHomeView: View {
                   session.favorite(at: suggestion.coordinate) == nil {
             favoriteRenameSuggestion = nil
         }
-        showFavoriteToast(result.added ? "已收藏：\(result.name)" : "已取消收藏：\(result.name)")
+        showFavoriteToast(result.added ? L("已收藏：%@", "\(result.name)") : L("已取消收藏：%@", "\(result.name)"))
     }
 
     private func selectFavorite(_ favorite: SavedPlace) {
@@ -1198,7 +1336,7 @@ struct MapHomeView: View {
         }
         session.removeFavorite(favorite)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        showFavoriteToast("已删除收藏：\(session.favoriteDisplayName(favorite))")
+        showFavoriteToast(L("已删除收藏：%@", "\(session.favoriteDisplayName(favorite))"))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             suppressNextMapTap = false
         }
@@ -1206,26 +1344,28 @@ struct MapHomeView: View {
 
     private func buildRouteToCurrentTarget() {
         guard !session.routeActive, !session.routePaused else {
-            session.lastError = "请先结束当前轨迹，再生成新轨迹。"
+            session.lastError = L("请先结束当前轨迹，再生成新轨迹。")
             return
         }
         guard let target = session.selectedTargetCoordinate else {
             session.lastError = session.targetSelectionMode == .crosshair
-                ? "尚未取得准星位置，请先移动地图。"
-                : "请先在地图上放置图钉。"
+                ? L("尚未取得准星位置，请先移动地图。")
+                : L("请先在地图上放置图钉。")
             return
         }
         guard let current = currentRouteLocation else {
-            session.lastError = "尚未取得当前定位，请稍后重试。"
+            session.lastError = L("尚未取得当前定位，请稍后重试。")
             return
         }
         routeStart = current
         routeEnd = target
         routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
         closePinActions()
         showFavoriteToast(session.targetSelectionMode == .crosshair
-                          ? "正在生成前往准星的道路轨迹"
-                          : "正在生成前往图钉的道路轨迹")
+                          ? L("正在生成前往准星的道路轨迹")
+                          : L("正在生成前往图钉的道路轨迹"))
         buildRoadRoute()
     }
 
@@ -1254,7 +1394,16 @@ struct MapHomeView: View {
         guard session.autoFollowRoute,
               session.routeActive,
               let simulated = session.simulated else { return }
-        let span = region.span
+        guard !userIsManipulatingMap else {
+            // Keep the latest position; the camera is re-centred once the
+            // pinch/pan ends, so the user's zoom survives.
+            deferredFollowCoordinate = simulated
+            return
+        }
+        // Read the zoom level from the map view, not from `region`: during and
+        // right after a pinch the binding still holds the pre-gesture span, and
+        // re-applying that is what snapped the zoom level back.
+        let span = mapView?.region.span ?? region.span
         region = MKCoordinateRegion(center: simulated, span: span)
     }
 
@@ -1296,7 +1445,7 @@ struct MapHomeView: View {
                     )
                 }
             } else {
-                await MainActor.run { session.lastError = "没有找到匹配的地点。" }
+                await MainActor.run { session.lastError = L("没有找到匹配的地点。") }
             }
         }
     }
@@ -1361,7 +1510,7 @@ struct MapHomeView: View {
     private func buildRoadRoute() {
         guard !isRouting else { return }
         guard let start = routeStart, let end = routeEnd else {
-            session.lastError = "请设置路线起点和终点。"
+            session.lastError = L("请设置路线起点和终点。")
             return
         }
         isRouting = true
@@ -1385,7 +1534,7 @@ struct MapHomeView: View {
                     routeCoords = options.first?.coordinates ?? []
                     isRouting = false
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    showFavoriteToast("道路轨迹已生成")
+                    showFavoriteToast(L("道路轨迹已生成"))
                 }
             } catch {
                 await MainActor.run {
@@ -1404,7 +1553,7 @@ struct MapHomeView: View {
         }
         let path = routeCoords
         guard path.count >= 2 else {
-            session.lastError = "请先规划、手绘或导入一条轨迹。"
+            session.lastError = L("请先规划、手绘或导入一条轨迹。")
             return
         }
         showRouteSheet = false
@@ -1425,7 +1574,7 @@ struct MapHomeView: View {
             clearRoutePresentation()
         }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        showFavoriteToast("轨迹已删除")
+        showFavoriteToast(L("轨迹已删除"))
     }
 
     private func clearRoutePresentation() {
@@ -1434,6 +1583,8 @@ struct MapHomeView: View {
         routeOptions.removeAll()
         selectedRouteOptionID = nil
         routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
         drawnPath.removeAll()
         drawnRouteStart = nil
         drawnRouteEnd = nil
@@ -1449,6 +1600,8 @@ struct MapHomeView: View {
         routeOptions.removeAll()
         selectedRouteOptionID = nil
         routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
         drawnPath.removeAll()
         drawnRouteStart = nil
         drawnRouteEnd = nil
@@ -1458,7 +1611,39 @@ struct MapHomeView: View {
         drawMode = true
         closePinActions()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        showFavoriteToast("已开始手绘轨迹")
+        showFavoriteToast(L("已开始手绘轨迹"))
+    }
+
+    /// Re-opens a finished hand-drawn route for further editing.
+    ///
+    /// `saveDrawingRoute` samples `drawnPath` into `routeCoords` and leaves draw
+    /// mode, so the original vertices are what has to come back; the sampled
+    /// line only exists for display. Restoring `drawnPath` keeps undo and
+    /// "保存" working from where the user stopped.
+    private func editHandDrawnRoute() {
+        guard routeIsHandDrawn else { return }
+        let vertices = editingVertices ?? (drawnPath.count > 1 ? drawnPath : routeCoords)
+        guard vertices.count > 1 else {
+            session.lastError = L("这条轨迹没有可编辑的手绘点。")
+            return
+        }
+        session.discardRoute()
+        drawnPath = vertices
+        drawnRouteStart = nil
+        drawnRouteEnd = nil
+        routeOptions.removeAll()
+        selectedRouteOptionID = nil
+        routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
+        routeIsHandDrawn = false
+        routeCoords.removeAll()
+        routeStart = nil
+        routeEnd = nil
+        drawMode = true
+        closePinActions()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        showFavoriteToast(L("可继续编辑手绘轨迹"))
     }
 
     private func cancelDrawingRoute() {
@@ -1468,7 +1653,7 @@ struct MapHomeView: View {
         drawnRouteEnd = nil
         drawMode = false
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        showFavoriteToast("已取消手绘")
+        showFavoriteToast(L("已取消手绘"))
     }
 
     private func undoDrawingPoint() {
@@ -1481,7 +1666,7 @@ struct MapHomeView: View {
         guard drawMode, drawnPath.count > 1,
               let start = drawnPath.first,
               let end = drawnPath.last else {
-            session.lastError = "请至少绘制两个点后再保存。"
+            session.lastError = L("请至少绘制两个点后再保存。")
             return
         }
         drawnRouteStart = start
@@ -1490,51 +1675,205 @@ struct MapHomeView: View {
         routeOptions.removeAll()
         selectedRouteOptionID = nil
         routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
         routeCoords = RouteBuilder.sample(coordinates: drawnPath, every: 10)
         drawnPath.removeAll()
         drawMode = false
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        showFavoriteToast("手绘轨迹已保存")
+        showFavoriteToast(L("手绘轨迹已保存"))
     }
 
+    private func importGPXFromPicker() {
+        // Presented on the route sheet itself, so the page stays put; closing it
+        // first made the sheet disappear the moment the picker appeared.
+        LocusDocumentExchange.pickDocument(contentTypes: [.xml, .data]) { url in
+            importGPX(url)
+        }
+    }
     private func importGPX(_ url: URL) {
         do {
-            let coords = try GPXCodec.parse(url)
-            drawnPath.removeAll()
+            try applyGPX(LocusFileReader.data(from: url))
+            // The route is on the map now; the sheet has served its purpose.
+            showRouteSheet = false
+        } catch {
+            LocusDocumentExchange.notify(title: L("导入 GPX 失败"), message: error.localizedDescription)
+        }
+    }
+
+    private func importGPX(data: Data) {
+        do {
+            try applyGPX(data)
+        } catch {
+            LocusDocumentExchange.notify(title: L("导入 GPX 失败"), message: error.localizedDescription)
+        }
+    }
+
+    private func applyGPX(_ data: Data) throws {
+        let coords = try GPXCodec.parse(data: data)
+        drawnPath.removeAll()
+        drawnRouteStart = nil
+        drawnRouteEnd = nil
+        drawMode = false
+        routeIsHandDrawn = false
+        routeOptions.removeAll()
+        selectedRouteOptionID = nil
+        routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
+        routeCoords = RouteBuilder.sample(coordinates: coords, every: 10)
+        generatedRouteReady = routeReadyState
+        if let first = coords.first {
+            session.pin = first
+            region = MKCoordinateRegion(center: first, latitudinalMeters: 2000, longitudinalMeters: 2000)
+        }
+    }
+
+    private func exportGPXFromSheet() {
+        // The share sheet is presented on the topmost controller, so the route
+        // sheet no longer has to close first; UIKit presents it over the page.
+        exportGPX()
+    }
+
+    // MARK: - Saved routes
+
+    /// Path currently on the map, preferring the sampled route over the raw
+    /// drawing so a saved route matches what is displayed.
+    private var currentRoutePath: [CLLocationCoordinate2D] {
+        routeCoords.isEmpty ? drawnPath : routeCoords
+    }
+
+    private func saveRouteFromSheet() {
+        let path = currentRoutePath
+        guard path.count > 1 else {
+            session.lastError = L("当前没有可保存的轨迹。")
+            return
+        }
+        // The rename alert is hosted by the map view, so the route sheet has to
+        // close first; that also matches how the other alerts are presented.
+        showRouteSheet = false
+        let suggestion = defaultRouteName()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            LocusDocumentExchange.promptForText(
+                title: L("保存轨迹"),
+                message: L("为这条轨迹命名，之后可在轨迹页的「已保存轨迹」中重新载入。"),
+                placeholder: L("轨迹名称"),
+                initialText: suggestion
+            ) { name in
+                commitRouteSave(name: name)
+            }
+        }
+    }
+
+    private func showSavedRoutesFromSheet() {
+        showRouteSheet = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            showSavedRoutes = true
+        }
+    }
+
+    private func defaultRouteName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return L("轨迹 %@", "\(formatter.string(from: Date()))")
+    }
+
+    private func commitRouteSave(name input: String) {
+        let path = currentRoutePath
+        guard path.count > 1 else {
+            session.lastError = L("当前没有可保存的轨迹。")
+            return
+        }
+        guard path.count <= SavedRoute.maxStoredPoints else {
+            session.lastError = SavedRouteError.tooManyPoints(path.count).localizedDescription
+            return
+        }
+
+        let name = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        // `routeIsHandDrawn` is only set once a drawing is committed; while the
+        // user is still in draw mode it is false, so drawMode has to be checked
+        // first or an in-progress sketch is saved as a plain route.
+        let source: SavedRoute.Source = drawMode
+            ? .drawn
+            : (routeIsHandDrawn ? .drawn : (routeOptions.isEmpty ? .imported : .planned))
+
+        var routes = SavedRoute.load()
+        // A hand-drawn route keeps its original vertices: the displayed line is
+        // resampled every 10 m, which loses the corners needed to edit it again.
+        let raw: [CLLocationCoordinate2D]? = (drawMode || routeIsHandDrawn)
+            ? (drawnPath.count > 1 ? drawnPath : (editingVertices ?? path))
+            : nil
+        let route = SavedRoute(
+            name: name.isEmpty ? defaultRouteName() : name,
+            coordinates: path,
+            source: source,
+            rawVertices: raw
+        )
+        routes.insert(route, at: 0)
+        if routes.count > SavedRoute.maxStoredRoutes {
+            routes = Array(routes.prefix(SavedRoute.maxStoredRoutes))
+        }
+        SavedRoute.save(routes)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showFavoriteToast(L("轨迹已保存"))
+    }
+
+    private func loadSavedRoute(_ route: SavedRoute) {
+        let coords = route.coordinates
+        guard coords.count > 1 else { return }
+        drawnPath.removeAll()
+        drawMode = false
+        routeOptions.removeAll()
+        selectedRouteOptionID = nil
+        routeWaypoints.removeAll()
+        selectedWaypointIndex = nil
+        editingVertices = nil
+        routeCoords = RouteBuilder.sample(coordinates: coords, every: 10)
+        // Restore the same presentation the route had when it was saved: a
+        // hand-drawn track is dashed and orange (and brings back its end caps),
+        // an imported or planned one keeps the solid accent stroke.
+        routeIsHandDrawn = route.source == .drawn
+        if routeIsHandDrawn {
+            drawnRouteStart = coords.first
+            drawnRouteEnd = coords.last
+            editingVertices = route.editableVertices
+        } else {
             drawnRouteStart = nil
             drawnRouteEnd = nil
-            drawMode = false
-            routeIsHandDrawn = false
-            routeOptions.removeAll()
-            selectedRouteOptionID = nil
-            routeWaypoints.removeAll()
-            routeCoords = RouteBuilder.sample(coordinates: coords, every: 10)
-            if let first = coords.first {
-                session.pin = first
-                region = MKCoordinateRegion(center: first, latitudinalMeters: 2000, longitudinalMeters: 2000)
-            }
-        } catch {
-            session.lastError = error.localizedDescription
+            editingVertices = nil
         }
+        generatedRouteReady = routeReadyState
+        if let first = coords.first {
+            session.pin = first
+            region = MKCoordinateRegion(center: first, latitudinalMeters: 2000, longitudinalMeters: 2000)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showFavoriteToast(L("已载入「%@」", "\(route.name)"))
     }
 
     private func exportGPX() {
         let path = routeCoords.isEmpty ? drawnPath : routeCoords
         guard !path.isEmpty else {
-            session.lastError = "当前没有可导出的轨迹。"
+            // `session.lastError` drives a SwiftUI alert that is swallowed while
+            // this sheet is up, so failures are reported through UIKit alerts.
+            LocusDocumentExchange.notify(title: L("导出 GPX"), message: L("当前没有可导出的轨迹。"))
             return
         }
         let gpx = GPXCodec.export(path)
+        guard let data = gpx.data(using: .utf8) else {
+            LocusDocumentExchange.notify(title: L("导出 GPX"), message: L("无法生成 GPX 数据。"))
+            return
+        }
+        GPXCodec.RecentExports.store(data, filename: "Locus-Route.gpx")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("Locus-Route.gpx")
         do {
-            try gpx.data(using: .utf8)?.write(to: url)
-            let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let root = scene.keyWindow?.rootViewController {
-                root.present(av, animated: true)
-            }
+            try data.write(to: url, options: .atomic)
         } catch {
-            session.lastError = error.localizedDescription
+            LocusDocumentExchange.notify(title: L("导出失败"), message: error.localizedDescription)
+            return
+        }
+        LocusDocumentExchange.share(fileAt: url) { error in
+            LocusDocumentExchange.notify(title: L("导出失败"), message: error.localizedDescription)
         }
     }
 }
@@ -1568,7 +1907,7 @@ private struct FavoriteMapMarker: View {
             .simultaneousGesture(favoritePressGesture)
 
             if selected {
-                Label("删除收藏", systemImage: "trash.fill")
+                Label(L("删除收藏"), systemImage: "trash.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(LocusTheme.danger)
                     .lineLimit(1)
@@ -1578,7 +1917,7 @@ private struct FavoriteMapMarker: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         onRemove()
                     }
-                    .accessibilityLabel("删除收藏")
+                    .accessibilityLabel(L("删除收藏"))
                     .accessibilityAddTraits(.isButton)
                     .locusGlass(.regular, in: Capsule())
                     .offset(y: -46)
@@ -1662,20 +2001,50 @@ private struct RouteEndpointMarker: View {
 
 private struct RouteWaypointMarker: View {
     let number: Int
+    var selected: Bool = false
+    var onTap: () -> Void = {}
+    var onRemove: () -> Void = {}
 
     var body: some View {
-        ZStack {
-            Image(systemName: "mappin.circle.fill")
-                .font(.title.weight(.semibold))
-                .foregroundColor(.blue)
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-            Text("\(number)")
-                .font(.caption2.weight(.bold))
-                .foregroundColor(.white)
-                .offset(y: -2)
+        ZStack(alignment: .bottom) {
+            Button(action: onTap) {
+                ZStack {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.title.weight(.semibold))
+                        .foregroundColor(selected ? LocusTheme.accent : .blue)
+                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    Text("\(number)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.white)
+                        .offset(y: -2)
+                }
+                .frame(width: 38, height: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if selected {
+                // Same pattern as the favorite star: tapping selects, then the
+                // delete pill appears above the marker.
+                Button(action: onRemove) {
+                    Label(L("删除途经点"), systemImage: "trash.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(LocusTheme.danger)
+                        .lineLimit(1)
+                        .frame(width: 140, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .locusGlass(.regular, in: Capsule())
+                .offset(y: -46)
+                .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                .accessibilityLabel(L("删除途经点 %@", "\(number)"))
+            }
         }
-        .frame(width: 38, height: 44)
-        .accessibilityLabel("途经点 \(number)")
+        .frame(width: 140, height: 92, alignment: .bottom)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: selected)
+        .accessibilityLabel(L("途经点 %@", "\(number)"))
+        .accessibilityHint(selected ? L("再次轻点收起，或点上方按钮删除") : L("轻点显示删除按钮"))
     }
 }
 
@@ -1699,10 +2068,19 @@ struct LocusMapView: UIViewRepresentable {
     var onMapTap: (CLLocationCoordinate2D) -> Void
     var onMapLongPress: (CLLocationCoordinate2D) -> Void
     var onRegionSettled: (() -> Void)?
+    /// Fires continuously while the user pans/zooms, so screen-space overlays
+    /// (favorite stars, pins) track the map instead of jumping on release.
+    var onRegionChanging: ((MKCoordinateRegion) -> Void)?
+    /// Fires when the user starts/ends a pan, pinch or rotation.
+    var onUserInteractionBegan: (() -> Void)?
+    var onUserInteractionEnded: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator(self)
         coordinator.onRegionSettled = onRegionSettled
+        coordinator.onRegionChanging = onRegionChanging
+        coordinator.onUserInteractionBegan = onUserInteractionBegan
+        coordinator.onUserInteractionEnded = onUserInteractionEnded
         return coordinator
     }
 
@@ -1765,6 +2143,19 @@ struct LocusMapView: UIViewRepresentable {
         tap.delegate = gate
         longPress.delegate = gate
 
+        // Observers that report "the user is driving the camera" without
+        // competing with MapKit's own recognizers: they recognise alongside the
+        // map's pan/pinch and never consume the gesture.
+        let cameraObserver = CameraGestureObserver(
+            onBegan: { context.coordinator.onUserInteractionBegan?() },
+            onEnded: { context.coordinator.onUserInteractionEnded?() }
+        )
+        context.coordinator.cameraObserver = cameraObserver
+        for recognizer in cameraObserver.makeRecognizers() {
+            recognizer.delegate = cameraObserver
+            mapView.addGestureRecognizer(recognizer)
+        }
+
         onMapViewCreated(mapView)
         return mapView
     }
@@ -1788,6 +2179,10 @@ struct LocusMapView: UIViewRepresentable {
             context.coordinator.didSetInitialRegion = true
             mapView.setRegion(region, animated: false)
             context.coordinator.lastRegion = region
+            // Seed the recorded camera immediately: `mapViewDidChangeVisibleRegion`
+            // also covers this, but seeding here guarantees a valid value even if
+            // the user switches language before the first delegate callback.
+            context.coordinator.onRegionChanging?(mapView.region)
         }
 
         // Apply programmatic region changes only; never fight the user's pan.
@@ -1910,6 +2305,10 @@ struct LocusMapView: UIViewRepresentable {
         var drawnKey: String?
         var touchGate: MapTouchGate?
         var onRegionSettled: (() -> Void)?
+        var onRegionChanging: ((MKCoordinateRegion) -> Void)?
+        var onUserInteractionBegan: (() -> Void)?
+        var onUserInteractionEnded: (() -> Void)?
+        var cameraObserver: CameraGestureObserver?
 
         init(_ parent: LocusMapView) {
             self.parent = parent
@@ -1938,6 +2337,19 @@ struct LocusMapView: UIViewRepresentable {
             guard didSetInitialRegion else { return }
             parent.region = mapView.region
             onRegionSettled?()
+        }
+
+        /// Called continuously while the visible region changes — including
+        /// mid-gesture, which `regionDidChangeAnimated` never does.
+        ///
+        /// The marker repositioning happens here, synchronously, because this
+        /// callback runs inside MapKit's own layout pass: views moved now are
+        /// drawn in the same frame as the map behind them. Routing it through
+        /// SwiftUI state instead deferred the move by at least one runloop turn,
+        /// which is what made markers trail the map.
+        func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
+            guard didSetInitialRegion else { return }
+            onRegionChanging?(mapView.region)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -1971,10 +2383,6 @@ struct LocusMapView: UIViewRepresentable {
             return MKOverlayRenderer(overlay: overlay)
         }
     }
-}
-
-private extension UIWindowScene {
-    var keyWindow: UIWindow? { windows.first { $0.isKeyWindow } }
 }
 
 /// Polyline renderer that draws white chevron arrowheads (">" shapes, no

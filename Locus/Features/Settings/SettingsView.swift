@@ -4,15 +4,11 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @EnvironmentObject private var session: SpoofSession
     @Environment(\.presentationMode) private var presentationMode
+    @EnvironmentObject private var languageStore: LocusLanguageStore
 
     @State private var showNameEasterEgg = false
-    @State private var showBackupExporter = false
-    @State private var showBackupImporter = false
-    @State private var backupDocument: LocusBackupDocument?
-    @State private var pendingBackup: LocusBackup?
-    @State private var backupNotice: String?
-    @State private var confirmClearSearchHistory = false
     @AppStorage(UserDefaults.elevationDataSourceKey) private var elevationSource: ElevationDataSource = .openMeteo
+    @AppStorage("locus.backupIncludesRoutes") private var backupIncludesRoutes = true
 
     private var appVersion: String {
         let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -21,8 +17,8 @@ struct SettingsView: View {
     }
 
     private var altitudeDisplayText: String {
-        guard let altitude = session.simulatedAltitude else { return "等待定位…" }
-        return String(format: "%.0f 米", altitude)
+        guard let altitude = session.simulatedAltitude else { return L("等待定位…") }
+        return String(format: L("%.0f 米"), altitude)
     }
 
     var body: some View {
@@ -32,43 +28,53 @@ struct SettingsView: View {
                     .locusSheetRows()
 
                 Section {
-                    Toggle("保存搜索历史", isOn: $session.searchHistoryEnabled)
+                    Toggle(L("保存搜索历史"), isOn: $session.searchHistoryEnabled)
                     if !session.searchHistory.isEmpty {
-                        Button("清空搜索历史") {
-                            confirmClearSearchHistory = true
+                        Button(L("清空搜索历史")) {
+                            LocusDocumentExchange.confirm(
+                                title: L("清空搜索历史"),
+                                message: L("此操作无法撤销。"),
+                                confirmTitle: L("清空"),
+                                onConfirm: { session.clearSearchHistory() }
+                            )
                         }
                     }
+                    Toggle(L("备份包含已保存轨迹"), isOn: $backupIncludesRoutes)
                     Button {
-                        backupDocument = LocusBackupDocument(backup: session.makeBackup())
-                        showBackupExporter = true
+                        exportBackup()
                     } label: {
-                        Label("导出 Locus 备份", systemImage: "square.and.arrow.up")
+                        Label(L("导出 Locus 备份"), systemImage: "square.and.arrow.up")
                     }
                     Button {
-                        showBackupImporter = true
+                        importBackup()
                     } label: {
-                        Label("导入 Locus 备份", systemImage: "square.and.arrow.down")
+                        Label(L("导入 Locus 备份"), systemImage: "square.and.arrow.down")
                     }
                 } header: {
-                    Text("搜索与数据")
+                    Text(L("搜索与数据"))
                 } footer: {
-                    Text("备份包含收藏、搜索历史和安全的界面设置，不包含正在运行的轨迹或设备连接状态。")
+                    Text(backupIncludesRoutes
+                         ? L("备份包含收藏、搜索历史、已保存轨迹、海拔数据源与 API Key，以及界面设置；不包含正在运行的轨迹或设备连接状态。")
+                         : L("备份不包含已保存轨迹，其余内容（收藏、搜索历史、海拔数据源与 API Key、界面设置）仍会导出。"))
                 }
                 .locusSheetRows()
+
+                languageSection
+                    .locusSheetRows()
 
                 privacySection
                     .locusSheetRows()
 
-                Section(header: Text("关于")) {
-                    LocusLabeledRow("版本", value: appVersion)
-                    LocusLabeledRow("定位引擎", value: "CLSimulationManager（TrollStore）")
+                Section(header: Text(L("关于"))) {
+                    LocusLabeledRow(L("版本"), value: appVersion)
+                    LocusLabeledRow(L("定位引擎"), value: "CLSimulationManager（TrollStore）")
                     Link(destination: URL(string: "https://github.com/jzksnsjswkw/locus-ZH")!) {
-                        LocusLabeledRow("项目主页", value: "jzksnsjswkw/locus-ZH")
+                        LocusLabeledRow(L("项目主页"), value: "jzksnsjswkw/locus-ZH")
                     }
                     Link(destination: URL(string: "https://github.com/ChrisMack32/Locus")!) {
-                        LocusLabeledRow("原始项目", value: "ChrisMack32/Locus")
+                        LocusLabeledRow(L("原始项目"), value: "ChrisMack32/Locus")
                     }
-                    Text("Locus 是采用 MIT 许可证的免费开源软件。定位注入使用 Apple 私有 CoreLocation 模拟 API（com.apple.locationd.simulation 权限）。")
+                    Text(L("Locus 是采用 MIT 许可证的免费开源软件。定位注入使用 Apple 私有 CoreLocation 模拟 API（com.apple.locationd.simulation 权限）。"))
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -78,7 +84,7 @@ struct SettingsView: View {
                     Button {
                         showNameEasterEgg = true
                     } label: {
-                        Text("locus，名词——地点。源自拉丁语，意为你所在之处。")
+                        Text(L("locus，名词——地点。源自拉丁语，意为你所在之处。"))
                             .font(.footnote.italic())
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -92,10 +98,10 @@ struct SettingsView: View {
             }
             .locusScrollContentBackgroundHidden()
             .background(Color.clear)
-            .navigationTitle("设置")
+            .navigationTitle(L("设置"))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
+                    Button(L("完成")) {
                         presentationMode.wrappedValue.dismiss()
                     }
                 }
@@ -103,95 +109,148 @@ struct SettingsView: View {
             .fullScreenCover(isPresented: $showNameEasterEgg) {
                 LocusEasterEggView()
             }
-            .fileExporter(
-                isPresented: $showBackupExporter,
-                document: backupDocument,
-                contentType: .json,
-                defaultFilename: "Locus-Backup"
-            ) { result in
-                if case .failure(let error) = result {
-                    backupNotice = error.localizedDescription
-                }
-            }
-            .fileImporter(
-                isPresented: $showBackupImporter,
-                allowedContentTypes: [.json],
-                allowsMultipleSelection: false
-            ) { result in
-                importBackup(result)
-            }
-            .locusConfirmationDialog(
-                "导入 Locus 备份",
-                isPresented: Binding(
-                    get: { pendingBackup != nil },
-                    set: { if !$0 { pendingBackup = nil } }
-                ),
-                confirmTitle: "合并收藏与历史，并应用设置",
+
+        }
+    }
+
+    private func exportBackup() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(session.makeBackup(includingRoutes: backupIncludesRoutes))
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Locus-Backup.json")
+            try data.write(to: url, options: .atomic)
+            // The share sheet is presented on the topmost controller, so the
+            // settings sheet can stay open underneath it.
+            LocusDocumentExchange.share(
+                fileAt: url,
+                onFailure: { LocusDocumentExchange.notify(title: L("导出失败"), message: $0.localizedDescription) }
+            )
+        } catch {
+            LocusDocumentExchange.notify(title: L("导出失败"), message: error.localizedDescription)
+        }
+    }
+
+    private func importBackup() {
+        // Presented on the settings sheet itself so the page stays put.
+        LocusDocumentExchange.pickDocument(contentTypes: [.json]) { url in
+            importBackup(from: url)
+        }
+    }
+
+    private func importBackup(from url: URL) {
+        do {
+            try applyBackup(LocusFileReader.data(from: url))
+        } catch {
+            LocusDocumentExchange.notify(title: L("导入失败"), message: error.localizedDescription)
+        }
+    }
+
+    private func applyBackup(_ data: Data) throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let backup = try decoder.decode(LocusBackup.self, from: data).validated()
+        let routeCount = backup.savedRoutes?.count ?? 0
+
+        var message = L("将导入 %@ 个收藏和 %@ 条搜索历史；本机同坐标收藏优先保留。", "\(backup.favorites.count)", "\(backup.searchHistory.count)")
+        if routeCount > 0 {
+            message += L("\n\n备份中还包含 %@ 条已保存轨迹。", "\(routeCount)")
+        }
+        message += L("\n\n备份中的海拔数据源与 API Key 会一并恢复。")
+
+        // Offered as an explicit choice, because routes are the bulkiest part of
+        // a backup and a restore may deliberately want only placements.
+        if routeCount > 0 {
+            LocusDocumentExchange.confirmWithOption(
+                title: L("导入 Locus 备份"),
+                message: message,
+                confirmTitle: L("全部导入"),
+                optionTitle: L("仅导入收藏与设置"),
                 onConfirm: {
-                    guard let backup = pendingBackup else { return }
+                    do {
+                        try session.applyBackup(backup, includingRoutes: true)
+                        LocusDocumentExchange.notify(title: L("Locus 备份"), message: L("备份导入完成。"))
+                    } catch {
+                        LocusDocumentExchange.notify(title: L("导入失败"), message: error.localizedDescription)
+                    }
+                },
+                onOption: {
+                    do {
+                        try session.applyBackup(backup, includingRoutes: false)
+                        LocusDocumentExchange.notify(title: L("Locus 备份"), message: L("已导入收藏与设置，轨迹未导入。"))
+                    } catch {
+                        LocusDocumentExchange.notify(title: L("导入失败"), message: error.localizedDescription)
+                    }
+                }
+            )
+        } else {
+            LocusDocumentExchange.confirm(
+                title: L("导入 Locus 备份"),
+                message: message,
+                confirmTitle: L("应用备份"),
+                onConfirm: {
                     do {
                         try session.applyBackup(backup)
-                        backupNotice = "备份导入完成。"
+                        LocusDocumentExchange.notify(title: L("Locus 备份"), message: L("备份导入完成。"))
                     } catch {
-                        backupNotice = error.localizedDescription
+                        LocusDocumentExchange.notify(title: L("导入失败"), message: error.localizedDescription)
                     }
-                    pendingBackup = nil
-                },
-                message: pendingBackup.map {
-                    "将导入 \($0.favorites.count) 个收藏和 \($0.searchHistory.count) 条搜索历史；本机同坐标收藏优先保留。"
-                } ?? ""
+                }
             )
-            .locusAlert(
-                "Locus 备份",
-                isPresented: Binding(
-                    get: { backupNotice != nil },
-                    set: { if !$0 { backupNotice = nil } }
-                ),
-                okTitle: "确定",
-                onOK: { backupNotice = nil },
-                message: backupNotice ?? ""
-            )
-            .locusConfirmAlert(
-                "清空搜索历史",
-                isPresented: $confirmClearSearchHistory,
-                confirmTitle: "清空",
-                onConfirm: { session.clearSearchHistory() },
-                message: "此操作无法撤销。"
-            )
+        }
+    }
+
+    private var languageSection: some View {
+        Section {
+            Picker(L("语言"), selection: Binding(
+                get: { languageStore.language },
+                set: { languageStore.set($0) }
+            )) {
+                ForEach(LocusLanguage.allCases) { language in
+                    Text(language.displayName).tag(language)
+                }
+            }
+            .locusPickerStyleMenu()
+        } header: {
+            Text(L("语言"))
+        } footer: {
+            Text(L("切换后界面会立即以所选语言重新显示；「跟随系统」使用设备的首选语言。"))
         }
     }
 
     private var mapInteractionSection: some View {
         Section {
-            Picker("定位点选择方式", selection: $session.targetSelectionMode) {
+            Picker(L("定位点选择方式"), selection: $session.targetSelectionMode) {
                 ForEach(TargetSelectionMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
             .locusPickerStyleMenu()
 
-            Picker("地图样式", selection: $session.mapStyleIndex) {
-                Text("标准").tag(0)
-                Text("卫星混合").tag(1)
+            Picker(L("地图样式"), selection: $session.mapStyleIndex) {
+                Text(L("标准")).tag(0)
+                Text(L("卫星混合")).tag(1)
             }
             .locusPickerStyleMenu()
 
-            Picker("外观", selection: $session.appearanceMode) {
+            Picker(L("外观"), selection: $session.appearanceMode) {
                 ForEach(AppAppearanceMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
             .locusPickerStyleMenu()
 
-            Toggle("地图缩放滑条", isOn: $session.zoomSliderEnabled)
-            Toggle("轨迹运行时自动跟随", isOn: $session.autoFollowRoute)
-            Toggle("启动时恢复上次地图视角", isOn: $session.restoreLastMapView)
+            Toggle(L("地图缩放滑条"), isOn: $session.zoomSliderEnabled)
+            Toggle(L("轨迹运行时自动跟随"), isOn: $session.autoFollowRoute)
+            Toggle(L("启动时恢复上次地图视角"), isOn: $session.restoreLastMapView)
 
-            Toggle("模拟位置随机抖动", isOn: $session.locationJitterEnabled)
+            Toggle(L("模拟位置随机抖动"), isOn: $session.locationJitterEnabled)
             if session.locationJitterEnabled {
                 Stepper(value: $session.locationJitterRadius, in: 0.1...20, step: 0.1) {
-                    LocusLabeledRow("抖动半径") {
-                        Text(String(format: "%.1f 米", session.locationJitterRadius))
+                    LocusLabeledRow(L("抖动半径")) {
+                        Text(String(format: L("%.1f 米"), session.locationJitterRadius))
                             .locusMonospacedDigit()
                             .foregroundColor(.secondary)
                     }
@@ -199,8 +258,8 @@ struct SettingsView: View {
             }
 
             Stepper(value: $session.locationUpdateInterval, in: 0.1...10, step: 0.1) {
-                LocusLabeledRow("定位更新间隔") {
-                    Text(String(format: "%.1f 秒", session.locationUpdateInterval))
+                LocusLabeledRow(L("定位更新间隔")) {
+                    Text(String(format: L("%.1f 秒"), session.locationUpdateInterval))
                         .locusMonospacedDigit()
                         .foregroundColor(.secondary)
                 }
@@ -211,16 +270,16 @@ struct SettingsView: View {
                 }
             }
             Stepper(value: $session.locationUpdateJitter, in: 0...max(0.1, session.locationUpdateInterval), step: 0.1) {
-                LocusLabeledRow("更新间隔随机抖动") {
-                    Text(String(format: "±%.1f 秒", session.locationUpdateJitter))
+                LocusLabeledRow(L("更新间隔随机抖动")) {
+                    Text(String(format: L("±%.1f 秒"), session.locationUpdateJitter))
                         .locusMonospacedDigit()
                         .foregroundColor(.secondary)
                 }
             }
 
-            Toggle("模拟真实海拔", isOn: $session.altitudeEnabled)
+            Toggle(L("模拟真实海拔"), isOn: $session.altitudeEnabled)
             if session.altitudeEnabled {
-                LocusLabeledRow("当前海拔") {
+                LocusLabeledRow(L("当前海拔")) {
                     if session.altitudeLoading {
                         VStack(alignment: .trailing, spacing: 2) {
                             ProgressView(value: Double(session.altitudeProgress), total: Double(max(1, session.altitudeTotal)))
@@ -237,7 +296,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Picker("海拔数据源", selection: $elevationSource) {
+                Picker(L("海拔数据源"), selection: $elevationSource) {
                     ForEach(ElevationDataSource.allCases) { source in
                         Text(source.pickerLabel).tag(source)
                     }
@@ -259,39 +318,26 @@ struct SettingsView: View {
                     .locusAutocapitalizationNever()
                     .locusAutocorrectionDisabled()
                     if let url = elevationSource.registerURL {
-                        Link("注册获取 API Key", destination: url)
+                        Link(L("注册获取 API Key"), destination: url)
                             .font(.caption)
                     }
                 }
             }
         } header: {
-            Text("地图与交互")
+            Text(L("地图与交互"))
         } footer: {
-            Text("位置抖动让轨迹更接近真实 GPS 行为；半径越大抖动越明显。更新间隔决定移动时推送模拟坐标的频率，不影响行进速度；抖动幅度会在每次更新时随机微调该间隔，且不会超过更新间隔。模拟海拔数据从所选源获取并本地缓存，海拔会随定位变化而更新。")
+            Text(L("位置抖动让轨迹更接近真实 GPS 行为；半径越大抖动越明显。更新间隔决定移动时推送模拟坐标的频率，不影响行进速度；抖动幅度会在每次更新时随机微调该间隔，且不会超过更新间隔。模拟海拔数据从所选源获取并本地缓存，海拔会随定位变化而更新。"))
         }
     }
 
     private var privacySection: some View {
-        Section(header: Text("隐私")) {
-            Text("所有数据均在设备端处理。收藏与搜索历史保存在 UserDefaults 中；无分析统计、无需账户，也不会上传任何内容。")
+        Section(header: Text(L("隐私"))) {
+            Text(L("所有数据均在设备端处理。收藏与搜索历史保存在 UserDefaults 中；无分析统计、无需账户，也不会上传任何内容。"))
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
     }
 
-    private func importBackup(_ result: Result<[URL], Error>) {
-        do {
-            guard let url = try result.get().first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            pendingBackup = try decoder.decode(LocusBackup.self, from: data).validated()
-        } catch {
-            backupNotice = error.localizedDescription
-        }
-    }
 }
 
 struct PlacesView: View {
@@ -302,6 +348,7 @@ struct PlacesView: View {
 
     @EnvironmentObject private var session: SpoofSession
     @Environment(\.presentationMode) private var presentationMode
+    @EnvironmentObject private var languageStore: LocusLanguageStore
 
     @State private var placeToRename: SavedPlace?
     @State private var renameText = ""
@@ -310,8 +357,8 @@ struct PlacesView: View {
         LocusNavStack {
             List {
                 if session.favorites.isEmpty {
-                    Section(header: Text("收藏地点")) {
-                        Text("在地图上选择图钉并点击星标即可收藏。")
+                    Section(header: Text(L("收藏地点"))) {
+                        Text(L("在地图上选择图钉并点击星标即可收藏。"))
                             .foregroundColor(.secondary)
                     }
                     .locusSheetRows()
@@ -336,13 +383,13 @@ struct PlacesView: View {
             }
             .locusScrollContentBackgroundHidden()
             .background(Color.clear)
-            .navigationTitle("收藏夹")
+            .navigationTitle(L("收藏夹"))
             .onAppear {
                 Task { await session.backfillFavoriteCountries() }
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { presentationMode.wrappedValue.dismiss() }
+                    Button(L("完成")) { presentationMode.wrappedValue.dismiss() }
                 }
             }
             .locusRenameAlert(
@@ -350,8 +397,8 @@ struct PlacesView: View {
                     get: { placeToRename != nil },
                     set: { if !$0 { placeToRename = nil } }
                 ),
-                title: "重命名收藏",
-                message: "设置一个方便以后识别的名称。",
+                title: L("重命名收藏"),
+                message: L("设置一个方便以后识别的名称。"),
                 text: $renameText
             ) {
                 if let place = placeToRename {
@@ -374,12 +421,12 @@ struct PlacesView: View {
                 .reduce(into: [String]()) { result, value in
                     if result.last != value { result.append(value) }
                 }
-            return parts.isEmpty ? "未知地区" : parts.joined(separator: " ")
+            return parts.isEmpty ? L("未知地区") : parts.joined(separator: " ")
         }
         return grouped.keys
             .sorted { lhs, rhs in
-                if lhs == "未知地区" { return false }
-                if rhs == "未知地区" { return true }
+                if lhs == L("未知地区") { return false }
+                if rhs == L("未知地区") { return true }
                 return lhs.localizedStandardCompare(rhs) == .orderedAscending
             }
             .map { FavoriteGroup(id: $0, places: grouped[$0] ?? []) }

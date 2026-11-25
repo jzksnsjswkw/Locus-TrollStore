@@ -233,7 +233,7 @@ extension View {
         if #available(iOS 15.0, *) {
             alert(title, isPresented: isPresented) {
                 Button(confirmTitle, role: .destructive) { onConfirm() }
-                Button("取消", role: .cancel) {}
+                Button(L("取消"), role: .cancel) {}
             } message: {
                 Text(message)
             }
@@ -256,7 +256,7 @@ extension View {
         isPresented: Binding<Bool>,
         confirmTitle: String,
         onConfirm: @escaping () -> Void,
-        cancelTitle: String = "取消",
+        cancelTitle: String = L("取消"),
         message: String
     ) -> some View {
         if #available(iOS 15.0, *) {
@@ -336,6 +336,41 @@ extension View {
         }
     }
 
+    /// Row actions where deletion needs confirmation.
+    ///
+    /// `swipeActions` with a destructive role animates the row out as soon as the
+    /// button is tapped, before any confirmation: the row slides away, comes
+    /// back when the alert appears, and slides away again on confirm. A plain
+    /// (non-destructive) swipe action and a plain context-menu button avoid that
+    /// animation entirely; the confirmation closes it and the list animates once.
+    @ViewBuilder
+    func locusConfirmingRowActions(
+        deleteTitle: String,
+        onDelete: @escaping () -> Void,
+        onRename: @escaping () -> Void
+    ) -> some View {
+        if #available(iOS 15.0, *) {
+            swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button { onDelete() } label: {
+                    Label(deleteTitle, systemImage: "trash.fill")
+                }
+                .tint(LocusTheme.danger)
+                Button { onRename() } label: {
+                    Label(L("重命名"), systemImage: "pencil")
+                }
+            }
+        } else {
+            contextMenu {
+                Button(action: onDelete) {
+                    Label(deleteTitle, systemImage: "trash.fill")
+                }
+                Button(action: onRename) {
+                    Label(L("重命名"), systemImage: "pencil")
+                }
+            }
+        }
+    }
+
     /// Favorite row actions: swipe actions on iOS 15+, context-menu fallback on iOS 14.
     @ViewBuilder
     func locusFavoriteRowActions(
@@ -345,19 +380,19 @@ extension View {
         if #available(iOS 15.0, *) {
             swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) { onDelete() } label: {
-                    Label("删除", systemImage: "trash.fill")
+                    Label(L("删除"), systemImage: "trash.fill")
                 }
                 Button { onRename() } label: {
-                    Label("重命名", systemImage: "pencil")
+                    Label(L("重命名"), systemImage: "pencil")
                 }
             }
         } else {
             contextMenu {
                 Button(action: { onDelete() }) {
-                    Label("删除", systemImage: "trash.fill")
+                    Label(L("删除"), systemImage: "trash.fill")
                 }
                 Button(action: { onRename() }) {
-                    Label("重命名", systemImage: "pencil")
+                    Label(L("重命名"), systemImage: "pencil")
                 }
             }
         }
@@ -414,8 +449,8 @@ struct LocusRenameAlertModifier: ViewModifier {
         if #available(iOS 16.0, *) {
             content.alert(title, isPresented: $isPresented) {
                 TextField(placeholder, text: $text)
-                Button("取消", role: .cancel) {}
-                Button("保存") { onSave() }
+                Button(L("取消"), role: .cancel) {}
+                Button(L("保存")) { onSave() }
                     .disabled(!canSave)
             } message: {
                 Text(message)
@@ -472,13 +507,13 @@ struct LocusRenameAlertModifier: ViewModifier {
             field.addTarget(emptyGuard, action: #selector(TextFieldEmptyGuard.textChanged(_:)), for: .editingChanged)
         }
 
-        let save = UIAlertAction(title: "保存", style: .default) { [weak alert] _ in
+        let save = UIAlertAction(title: L("保存"), style: .default) { [weak alert] _ in
             onSave(alert?.textFields?.first?.text ?? "")
         }
         save.isEnabled = canSave || !initialText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         alert.addAction(save)
 
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in
+        alert.addAction(UIAlertAction(title: L("取消"), style: .cancel) { _ in
             onCancel()
         })
 
@@ -505,7 +540,7 @@ extension View {
         isPresented: Binding<Bool>,
         title: String,
         message: String,
-        placeholder: String = "名称",
+        placeholder: String = L("名称"),
         text: Binding<String>,
         onSave: @escaping () -> Void
     ) -> some View {

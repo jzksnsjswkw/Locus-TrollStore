@@ -4,12 +4,17 @@ import UIKit
 import Vision
 
 enum MapDataSource: String {
-    case apple = "Apple"
-    case amap = "高德"
-    case unknown = ""
+    case apple
+    case amap
+    case unknown
 
+    /// Localized at access time: a raw value cannot call `L(…)`.
     var displayName: String? {
-        self == .unknown ? nil : rawValue
+        switch self {
+        case .apple: return L("Apple 地图")
+        case .amap: return L("高德")
+        case .unknown: return nil
+        }
     }
 }
 
@@ -122,15 +127,15 @@ final class MapDataSourceDetector: ObservableObject {
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .lowercased()
 
-        if normalized.contains("高德地图") ||
-            normalized.contains("高德") ||
+        if normalized.contains(L("高德地图")) ||
+            normalized.contains(L("高德")) ||
             normalized.contains("amap") ||
             normalized.contains("autonavi") {
             return .amap
         }
         if normalized.contains("apple maps") ||
-            normalized.contains("apple 地图") ||
-            normalized.contains("apple地图") ||
+            normalized.contains(L("apple 地图")) ||
+            normalized.contains(L("apple地图")) ||
             normalized.contains("maps by apple") ||
             normalized.contains("maps") ||
             (normalized.contains("maps") && normalized.contains("legal")) {
