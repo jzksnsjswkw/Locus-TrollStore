@@ -68,8 +68,8 @@ struct SettingsView: View {
                 Section(header: Text(L("关于"))) {
                     LocusLabeledRow(L("版本"), value: appVersion)
                     LocusLabeledRow(L("定位引擎"), value: "CLSimulationManager（TrollStore）")
-                    Link(destination: URL(string: "https://github.com/jzksnsjswkw/locus-ZH")!) {
-                        LocusLabeledRow(L("项目主页"), value: "jzksnsjswkw/locus-ZH")
+                    Link(destination: URL(string: "https://github.com/jzksnsjswkw/Locus-TrollStore")!) {
+                        LocusLabeledRow(L("项目主页"), value: "jzksnsjswkw/Locus-TrollStore")
                     }
                     Link(destination: URL(string: "https://github.com/ChrisMack32/Locus")!) {
                         LocusLabeledRow(L("原始项目"), value: "ChrisMack32/Locus")

@@ -26,7 +26,7 @@
 
 ## 安装
 
-完整步骤见 [SETUP.md](SETUP.md)。可以直接从 [Releases](https://github.com/jzksnsjswkw/locus-ZH/releases) 下载预编译的 `.tipa` 文件，或按下方说明自行编译。
+完整步骤见 [SETUP.md](SETUP.md)。可以直接从 [Releases](https://github.com/jzksnsjswkw/Locus-TrollStore/releases) 下载预编译的 `.tipa` 文件，或按下方说明自行编译。
 
 应用标识（Bundle ID）：`com.chrismack.locus`
 
